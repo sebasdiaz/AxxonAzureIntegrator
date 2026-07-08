@@ -20,12 +20,14 @@ var builder = new HostBuilder()
 
         services.AddSingleton<MappingEngine>();
 
-        // TODO(MVP): implementaciones reales sobre Cosmos DB. Los IDs de los usuarios
-        // de integración (app users de Dataverse / F&O) vienen de configuración.
+        // TODO(MVP): implementaciones reales sobre Cosmos DB, sender del topic para el
+        // IngestProcessor, e IDs de los usuarios de integración (app users de
+        // Dataverse / F&O) desde configuración.
         // services.AddSingleton<IEntityMapStore, CosmosEntityMapStore>();
         // services.AddSingleton<IXrefStore, CosmosXrefStore>();
         // services.AddSingleton<IWatermarkStore, CosmosWatermarkStore>();
-        // services.AddSingleton(sp => new EchoGuard(sp.GetRequiredService<IXrefStore>(), integrationUserIds));
+        // services.AddSingleton(new EchoGuard(integrationUserIds));
+        // services.AddSingleton(sp => serviceBusClient.CreateSender(changesTopicName));
         // services.AddSingleton<SyncPipeline>();
     });
 

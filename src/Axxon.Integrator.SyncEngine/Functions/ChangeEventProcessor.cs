@@ -1,31 +1,40 @@
 using Azure.Messaging.ServiceBus;
+using Axxon.Integrator.Core.Model;
+using Axxon.Integrator.Core.Sync;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 
 namespace Axxon.Integrator.SyncEngine.Functions;
 
 /// <summary>
-/// Punto de entrada del flujo vivo: consume los eventos de cambio que F&O (data events)
-/// y Dataverse (service endpoints) publican en el topic. Sesiones habilitadas para
-/// garantizar orden por registro; los reintentos agotados van a la dead-letter queue.
+/// Segundo salto del flujo vivo: consume los <see cref="ChangeEvent"/> ya normalizados
+/// que el <see cref="IngestProcessor"/> publica en el topic. Sesiones habilitadas para
+/// garantizar orden por registro (SessionId estampado en la ingesta).
+///
+/// Manejo de errores (ver architecture.md):
+/// - Permanentes (mapa/valor inválido, payload corrupto) → dead-letter inmediato con
+///   razón; reintentarlos solo quema entregas.
+/// - Transitorios (destino caído, throttling) → re-encolar una copia con
+///   ScheduledEnqueueTime y backoff exponencial, completando el original; el
+///   last-writer-wins del pipeline absorbe el desorden que introduce el re-encolado.
+/// TODO(fase 1): implementar esa clasificación; hoy toda excepción sigue el camino
+/// default reintento inmediato → DLQ al agotar MaxDeliveryCount.
 /// </summary>
-public sealed class ChangeEventProcessor(ILogger<ChangeEventProcessor> logger)
+public sealed class ChangeEventProcessor(SyncPipeline pipeline, ILogger<ChangeEventProcessor> logger)
 {
     [Function(nameof(ChangeEventProcessor))]
-    public Task RunAsync(
+    public async Task RunAsync(
         [ServiceBusTrigger("%Sync:ChangesTopic%", "%Sync:EngineSubscription%",
             Connection = "ServiceBusConnection", IsSessionsEnabled = true)]
         ServiceBusReceivedMessage message,
         CancellationToken ct)
     {
-        logger.LogInformation("Evento recibido: MessageId={MessageId} SessionId={SessionId}",
-            message.MessageId, message.SessionId);
+        var evt = message.Body.ToObjectFromJson<ChangeEvent>()
+            ?? throw new FormatException($"Mensaje {message.MessageId} sin ChangeEvent deserializable.");
 
-        // TODO(MVP):
-        // 1. Identificar el sistema origen (application property del mensaje o suscripción dedicada).
-        // 2. Parsear con el IChangeEventParser correspondiente -> ChangeEvent.
-        // 3. Delegar en SyncPipeline.ProcessAsync(evt, ct).
-        // Excepciones no controladas => reintento de Service Bus => DLQ al agotarse.
-        throw new NotImplementedException("Cablear parser + SyncPipeline. Fase 1 (MVP).");
+        logger.LogInformation("Evento recibido: {System}/{Entity}/{RecordId} {Operation} SessionId={SessionId} ({CorrelationId})",
+            evt.SourceSystem, evt.EntityName, evt.SourceRecordId, evt.Operation, message.SessionId, evt.CorrelationId);
+
+        await pipeline.ProcessAsync(evt, ct);
     }
 }

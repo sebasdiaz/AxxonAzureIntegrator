@@ -14,8 +14,7 @@ param location string = resourceGroup().location
 var name = '${prefix}-${env}'
 
 // --- Service Bus: backbone de mensajería ---------------------------------
-// Standard como mínimo: Basic no soporta topics. F&O publica sus data events
-// directo al topic 'changes' (endpoint configurado en Business events).
+// Standard como mínimo: Basic no soporta topics.
 resource serviceBus 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' = {
   name: '${name}-sb'
   location: location
@@ -25,6 +24,22 @@ resource serviceBus 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' = {
   }
 }
 
+// Cola de ingesta: F&O (data events) y Dataverse (service endpoints) publican acá
+// sus payloads nativos. Sin sesiones: esos endpoints no permiten estampar SessionId.
+// El IngestProcessor parsea, normaliza y re-publica al topic 'changes' con SessionId
+// y MessageId determinístico. Payload imparseable = error permanente → DLQ de esta cola.
+resource ingestQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' = {
+  parent: serviceBus
+  name: 'ingest'
+  properties: {
+    maxDeliveryCount: 10
+    deadLetteringOnMessageExpiration: true
+    lockDuration: 'PT1M'
+  }
+}
+
+// Topic de eventos normalizados (ChangeEvent en JSON). El duplicate detection es
+// efectivo porque el IngestProcessor estampa MessageId determinístico por evento.
 resource changesTopic 'Microsoft.ServiceBus/namespaces/topics@2022-10-01-preview' = {
   parent: serviceBus
   name: 'changes'
@@ -84,13 +99,18 @@ resource mapsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/conta
   }
 }
 
+// Dos documentos espejo por vínculo (uno por lado del par) con
+// lookupKey = '<pairKey>|<system>|<recordId>': point reads O(1) desde cualquier
+// lado y distribución pareja incluso durante el sync inicial (con pk por mapa, una
+// migración masiva martillaría una sola partición lógica). Consistencia entre
+// espejos por ETag; el escritor es único por sesión, así que la contención es rara.
 resource xrefContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2023-11-15' = {
   parent: cosmosDb
   name: 'xref'
   properties: {
     resource: {
       id: 'xref'
-      partitionKey: { paths: ['/entityMapName'], kind: 'Hash' }
+      partitionKey: { paths: ['/lookupKey'], kind: 'Hash' }
     }
   }
 }
@@ -160,6 +180,7 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'dotnet-isolated' }
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsights.properties.ConnectionString }
         { name: 'ServiceBusConnection__fullyQualifiedNamespace', value: '${serviceBus.name}.servicebus.windows.net' }
+        { name: 'Sync:IngestQueue', value: ingestQueue.name }
         { name: 'Sync:ChangesTopic', value: changesTopic.name }
         { name: 'Sync:EngineSubscription', value: engineSubscription.name }
       ]

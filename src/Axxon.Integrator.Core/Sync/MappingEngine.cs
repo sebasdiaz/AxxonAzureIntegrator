@@ -37,10 +37,24 @@ public sealed class MappingEngine
                 continue;
             }
 
-            if (fieldMap.ValueMap is not null && value is not null &&
-                fieldMap.ValueMap.TryGetValue(value.ToString()!, out var mapped))
+            if (fieldMap.ValueMap is not null && value is not null)
             {
-                value = mapped;
+                if (fieldMap.ValueMap.TryGetValue(value.ToString()!, out var mapped))
+                {
+                    value = mapped;
+                }
+                else if (fieldMap.DefaultValue is not null)
+                {
+                    value = fieldMap.DefaultValue;
+                }
+                else
+                {
+                    // Error permanente (config incompleta): dejar pasar el valor crudo
+                    // escribiría un option set inválido en el destino. Debe ir a DLQ,
+                    // no reintentarse.
+                    throw new InvalidOperationException(
+                        $"El mapa '{map.Name}' no tiene traducción en el ValueMap de '{fieldMap.Source}' para el valor '{value}' y no define DefaultValue.");
+                }
             }
 
             if (fieldMap.Transform is not null)
