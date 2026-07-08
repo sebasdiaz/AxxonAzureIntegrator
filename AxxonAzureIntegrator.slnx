@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Axxon.Integrator.Connectors.Dataverse/Axxon.Integrator.Connectors.Dataverse.csproj" />
+    <Project Path="src/Axxon.Integrator.Connectors.FinOps/Axxon.Integrator.Connectors.FinOps.csproj" />
+    <Project Path="src/Axxon.Integrator.Core/Axxon.Integrator.Core.csproj" />
+    <Project Path="src/Axxon.Integrator.SyncEngine/Axxon.Integrator.SyncEngine.csproj" />
+  </Folder>
+</Solution>
