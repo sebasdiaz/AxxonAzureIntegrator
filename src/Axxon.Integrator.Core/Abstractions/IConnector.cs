@@ -23,8 +23,8 @@ public interface IConnector
 
     /// <summary>
     /// Escritura idempotente en el destino. Debe comportarse como upsert: si
-    /// <see cref="EntityPayload.TargetRecordId"/> viene null, resolver por clave
-    /// natural antes de crear.
+    /// <see cref="EntityPayload.TargetRecordId"/> viene null, resolver el registro
+    /// existente por <see cref="EntityPayload.IntegrationKey"/> antes de crear.
     /// </summary>
     Task<UpsertResult> UpsertAsync(EntityPayload payload, CancellationToken ct);
 

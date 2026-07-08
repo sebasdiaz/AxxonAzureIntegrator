@@ -14,6 +14,7 @@ src/
   Axxon.Integrator.Connectors.FinOps/    Conector Dynamics 365 F&O
   Axxon.Integrator.Connectors.Dataverse/ Conector Dataverse
   Axxon.Integrator.SyncEngine/           Azure Functions (.NET 8 isolated)
+  Axxon.Integrator.AdminPortal/          Portal Blazor: diseñador de mapas, DLQ, métricas
 infra/
   main.bicep                             Service Bus, Cosmos, Function App, Key Vault, App Insights
 docs/
@@ -25,6 +26,16 @@ docs/
 ```powershell
 dotnet build AxxonAzureIntegrator.slnx
 ```
+
+## Portal de administración
+
+```powershell
+dotnet run --project src/Axxon.Integrator.AdminPortal
+```
+
+Diseñador de mapas estilo Dual Write (campos, transformaciones, value maps,
+integration key compuesta) persistiendo documentos JSON en `maps/` (Cosmos DB en
+producción, mismo formato).
 
 ## Estado
 

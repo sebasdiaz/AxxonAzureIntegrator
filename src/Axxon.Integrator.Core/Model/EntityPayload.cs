@@ -14,6 +14,13 @@ public sealed record EntityPayload
     public required ChangeOperation Operation { get; init; }
     public required IReadOnlyDictionary<string, object?> Fields { get; init; }
 
+    /// <summary>
+    /// Integration key del mapa (campos del destino, ya presentes en <see cref="Fields"/>).
+    /// Cuando <see cref="TargetRecordId"/> es null, el conector resuelve el registro
+    /// existente con estos campos antes de crear.
+    /// </summary>
+    public IReadOnlyList<string> IntegrationKey { get; init; } = [];
+
     public string? Company { get; init; }
 
     /// <summary>Clave de idempotencia: el conector destino debe garantizar que aplicar dos veces el mismo payload no duplica.</summary>

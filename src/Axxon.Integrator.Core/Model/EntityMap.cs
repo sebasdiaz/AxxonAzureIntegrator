@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Axxon.Integrator.Core.Model;
 
 public enum SyncDirection
@@ -33,6 +35,7 @@ public sealed record EntityMap
     /// del xref y su estado de sync — requisito para que eco y last-writer-wins crucen
     /// sistemas.
     /// </summary>
+    [JsonIgnore] // derivada; no se persiste en el documento JSON del mapa
     public string PairKey
     {
         get
@@ -55,10 +58,12 @@ public sealed record EntityMap
     public required IReadOnlyList<FieldMap> Fields { get; init; }
 
     /// <summary>
-    /// Campo del origen que actúa como clave natural para el primer match contra el
-    /// destino cuando todavía no existe entrada en el xref (ej. "accountnumber").
+    /// Integration key (como en Dual Write): campos del destino, posiblemente
+    /// compuesta (ej. ["accountnumber"] o ["dataAreaId", "CustomerAccount"]), que
+    /// identifican el registro para el primer match cuando todavía no existe vínculo
+    /// en el xref. Deben estar entre los campos mapeados.
     /// </summary>
-    public string? NaturalKeyField { get; init; }
+    public IReadOnlyList<string> IntegrationKey { get; init; } = [];
 
     /// <summary>Los mapas son versionados: los eventos en vuelo se procesan con la versión vigente al consumirse.</summary>
     public int Version { get; init; } = 1;

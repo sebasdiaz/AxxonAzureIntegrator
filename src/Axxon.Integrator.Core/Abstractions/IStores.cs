@@ -71,13 +71,24 @@ public sealed record SyncState
     public required DateTimeOffset LastWriterOccurredAt { get; init; }
 }
 
-/// <summary>Acceso a la configuración de mapas (Cosmos DB en producción, JSON local en desarrollo).</summary>
+/// <summary>
+/// Acceso a la configuración de mapas: documentos JSON versionados (Cosmos DB en
+/// producción, archivos locales en desarrollo). Un bidireccional se modela como dos
+/// mapas direccionales que comparten <see cref="EntityMap.PairKey"/>.
+/// El motor solo lee; el portal de administración escribe.
+/// </summary>
 public interface IEntityMapStore
 {
-    /// <summary>Mapas activos que tienen a <paramref name="sourceSystem"/>/<paramref name="sourceEntity"/> como origen (o como lado de un bidireccional).</summary>
+    /// <summary>Mapas activos que tienen a <paramref name="sourceSystem"/>/<paramref name="sourceEntity"/> como origen.</summary>
     Task<IReadOnlyList<EntityMap>> GetMapsForSourceAsync(string sourceSystem, string sourceEntity, CancellationToken ct);
 
     Task<EntityMap?> GetAsync(string name, CancellationToken ct);
+
+    /// <summary>Todos los mapas, en cualquier estado. Para el portal de administración.</summary>
+    Task<IReadOnlyList<EntityMap>> GetAllAsync(CancellationToken ct);
+
+    /// <summary>Crea o reemplaza el documento del mapa (el diseñador incrementa <see cref="EntityMap.Version"/>).</summary>
+    Task SaveAsync(EntityMap map, CancellationToken ct);
 }
 
 /// <summary>Persistencia de watermarks para polling y sync inicial.</summary>

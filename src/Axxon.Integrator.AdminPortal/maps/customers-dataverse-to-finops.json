@@ -1,0 +1,18 @@
+{
+  "name": "customers-dataverse-to-finops",
+  "sourceSystem": "dataverse",
+  "sourceEntity": "account",
+  "targetSystem": "finops",
+  "targetEntity": "CustomersV3",
+  "direction": "oneWay",
+  "status": "active",
+  "companies": ["usmf"],
+  "fields": [
+    { "source": "accountnumber", "target": "CustomerAccount" },
+    { "source": "name", "target": "OrganizationName", "transform": "trim" },
+    { "source": "creditlimit", "target": "CreditLimit" },
+    { "source": "industrycode", "target": "SegmentId", "valueMap": { "1": "Retail", "2": "Wholesale" }, "defaultValue": "Retail" }
+  ],
+  "integrationKey": ["CustomerAccount"],
+  "version": 1
+}

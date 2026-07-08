@@ -1,0 +1,380 @@
+@page "/maps/new"
+@page "/maps/{Name}"
+@inject IEntityMapStore MapStore
+@inject IReadOnlyDictionary<string, IConnector> Connectors
+@inject MappingEngine Mapping
+@inject NavigationManager Nav
+@using System.Text.Json
+@using Axxon.Integrator.Core.Stores
+
+<PageTitle>@(_isNew ? "Nuevo mapa" : Name) — Axxon Integrator</PageTitle>
+
+<h1>@(_isNew ? "Nuevo mapa" : $"Mapa: {Name}")</h1>
+
+@if (_error is not null)
+{
+    <div class="banner error">@_error</div>
+}
+@if (_metadataWarning is not null)
+{
+    <div class="banner warning">@_metadataWarning</div>
+}
+
+<section class="card">
+    <h2>Definición</h2>
+    <div class="form-grid">
+        <label>Nombre
+            <input @bind="_name" disabled="@(!_isNew)" placeholder="customers-dataverse-to-finops" />
+        </label>
+        <label>Estado
+            <select @bind="_status">
+                <option value="Active">Activo</option>
+                <option value="Paused">Pausado</option>
+            </select>
+        </label>
+        <label>Sistema origen
+            <select @bind="_sourceSystem" @bind:after="LoadMetadataAsync">
+                @foreach (var s in Connectors.Keys)
+                {
+                    <option value="@s">@s</option>
+                }
+            </select>
+        </label>
+        <label>Entidad origen
+            <input @bind="_sourceEntity" @bind:after="LoadMetadataAsync" placeholder="account" />
+        </label>
+        <label>Sistema destino
+            <select @bind="_targetSystem" @bind:after="LoadMetadataAsync">
+                @foreach (var s in Connectors.Keys)
+                {
+                    <option value="@s">@s</option>
+                }
+            </select>
+        </label>
+        <label>Entidad destino
+            <input @bind="_targetEntity" @bind:after="LoadMetadataAsync" placeholder="CustomersV3" />
+        </label>
+        <label>Empresas (separadas por coma; vacío = todas)
+            <input @bind="_companies" placeholder="usmf, dat" />
+        </label>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Campos</h2>
+    <table class="grid fields">
+        <thead>
+            <tr>
+                <th>Campo origen</th>
+                <th>Campo destino</th>
+                <th>Transformación</th>
+                <th>Value map (origen=destino, uno por línea)</th>
+                <th>Default</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in _rows)
+            {
+                var r = row;
+                <tr>
+                    <td>
+                        <input list="source-fields" @bind="r.Source" />
+                    </td>
+                    <td>
+                        <input list="target-fields" @bind="r.Target" @bind:after="PruneIntegrationKey" />
+                    </td>
+                    <td>
+                        <select @bind="r.Transform">
+                            <option value="">(ninguna)</option>
+                            @foreach (var t in Mapping.TransformNames)
+                            {
+                                <option value="@t">@t</option>
+                            }
+                        </select>
+                    </td>
+                    <td>
+                        <textarea rows="1" @bind="r.ValueMapText" placeholder="1=Retail&#10;2=Wholesale"></textarea>
+                    </td>
+                    <td>
+                        <input @bind="r.Default" />
+                    </td>
+                    <td>
+                        <button class="btn danger" @onclick="() => RemoveRow(r)">✕</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <datalist id="source-fields">
+        @foreach (var f in _sourceFields)
+        {
+            <option value="@f" />
+        }
+    </datalist>
+    <datalist id="target-fields">
+        @foreach (var f in _targetFields)
+        {
+            <option value="@f" />
+        }
+    </datalist>
+    <button class="btn" @onclick="AddRow">+ Agregar campo</button>
+</section>
+
+<section class="card">
+    <h2>Integration key</h2>
+    <p class="hint">
+        Campos del destino (posiblemente compuesta, como en Dual Write) que identifican
+        el registro para el primer match cuando todavía no existe vínculo en el xref.
+    </p>
+    @if (!MappedTargets.Any())
+    {
+        <p class="placeholder">Mapeá al menos un campo destino para poder elegir la clave.</p>
+    }
+    else
+    {
+        <div class="key-options">
+            @foreach (var target in MappedTargets)
+            {
+                var field = target;
+                <label class="key-option">
+                    <input type="checkbox" checked="@_integrationKey.Contains(field)"
+                           @onchange="e => ToggleKey(field, (bool)e.Value!)" />
+                    @field
+                </label>
+            }
+        </div>
+    }
+</section>
+
+<section class="toolbar">
+    <button class="btn primary" @onclick="SaveAsync">Guardar (v@(_isNew ? 1 : _version + 1))</button>
+    <button class="btn" @onclick="TogglePreview">@(_jsonPreview is null ? "Ver JSON" : "Ocultar JSON")</button>
+    <a class="btn" href="/maps">Cancelar</a>
+</section>
+
+@if (_jsonPreview is not null)
+{
+    <section class="card">
+        <h2>Documento JSON</h2>
+        <p class="hint">Así se persiste el mapa (archivo local en desarrollo, Cosmos DB en producción).</p>
+        <pre class="json">@_jsonPreview</pre>
+    </section>
+}
+
+@code {
+    [Parameter] public string? Name { get; set; }
+
+    private bool _isNew => Name is null;
+
+    private string _name = "";
+    private string _sourceSystem = "dataverse";
+    private string _sourceEntity = "";
+    private string _targetSystem = "finops";
+    private string _targetEntity = "";
+    private string _companies = "";
+    private MapStatus _status = MapStatus.Active;
+    private int _version = 1;
+    private List<FieldRow> _rows = [new()];
+    private readonly HashSet<string> _integrationKey = new(StringComparer.OrdinalIgnoreCase);
+
+    private IReadOnlyList<string> _sourceFields = [];
+    private IReadOnlyList<string> _targetFields = [];
+    private string? _metadataWarning;
+    private string? _error;
+    private string? _jsonPreview;
+
+    private IEnumerable<string> MappedTargets =>
+        _rows.Select(r => r.Target.Trim())
+             .Where(t => t.Length > 0)
+             .Distinct(StringComparer.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (_isNew)
+        {
+            await LoadMetadataAsync();
+            return;
+        }
+
+        var map = await MapStore.GetAsync(Name!, CancellationToken.None);
+        if (map is null)
+        {
+            _error = $"No existe el mapa '{Name}'.";
+            return;
+        }
+
+        _name = map.Name;
+        _sourceSystem = map.SourceSystem;
+        _sourceEntity = map.SourceEntity;
+        _targetSystem = map.TargetSystem;
+        _targetEntity = map.TargetEntity;
+        _companies = string.Join(", ", map.Companies);
+        _status = map.Status;
+        _version = map.Version;
+        _rows = [.. map.Fields.Select(FieldRow.From)];
+        _integrationKey.UnionWith(map.IntegrationKey);
+
+        await LoadMetadataAsync();
+    }
+
+    private async Task LoadMetadataAsync()
+    {
+        _metadataWarning = null;
+        _sourceFields = await FieldsOfAsync(_sourceSystem, _sourceEntity);
+        _targetFields = await FieldsOfAsync(_targetSystem, _targetEntity);
+    }
+
+    private async Task<IReadOnlyList<string>> FieldsOfAsync(string system, string entity)
+    {
+        if (string.IsNullOrWhiteSpace(entity) || !Connectors.TryGetValue(system, out var connector))
+        {
+            return [];
+        }
+
+        try
+        {
+            var metadata = await connector.GetMetadataAsync(entity.Trim(), CancellationToken.None);
+            return [.. metadata.Fields.Keys.OrderBy(f => f, StringComparer.OrdinalIgnoreCase)];
+        }
+        catch (NotImplementedException)
+        {
+            // El conector todavía no expone metadata: el diseñador degrada a entrada
+            // manual de nombres de campo en lugar de bloquear al usuario.
+            _metadataWarning = "La metadata de los conectores no está disponible aún; escribí los nombres de campo a mano.";
+            return [];
+        }
+        catch (Exception ex)
+        {
+            _metadataWarning = $"No se pudo leer la metadata de {system}/{entity}: {ex.Message}";
+            return [];
+        }
+    }
+
+    private void AddRow() => _rows.Add(new FieldRow());
+
+    private void RemoveRow(FieldRow row)
+    {
+        _rows.Remove(row);
+        PruneIntegrationKey();
+    }
+
+    private void ToggleKey(string field, bool selected)
+    {
+        if (selected)
+        {
+            _integrationKey.Add(field);
+        }
+        else
+        {
+            _integrationKey.Remove(field);
+        }
+    }
+
+    /// <summary>La clave solo puede referenciar campos destino que sigan mapeados.</summary>
+    private void PruneIntegrationKey() =>
+        _integrationKey.IntersectWith(MappedTargets);
+
+    private EntityMap BuildMap(int version) => new()
+    {
+        Name = _name.Trim(),
+        SourceSystem = _sourceSystem.Trim(),
+        SourceEntity = _sourceEntity.Trim(),
+        TargetSystem = _targetSystem.Trim(),
+        TargetEntity = _targetEntity.Trim(),
+        Status = _status,
+        Companies = [.. _companies.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)],
+        Fields = [.. _rows.Where(r => r.IsComplete).Select(r => r.ToFieldMap())],
+        IntegrationKey = [.. _integrationKey],
+        Version = version,
+    };
+
+    private async Task SaveAsync()
+    {
+        _error = Validate();
+        if (_error is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            await MapStore.SaveAsync(BuildMap(_isNew ? 1 : _version + 1), CancellationToken.None);
+            Nav.NavigateTo("/maps");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private string? Validate()
+    {
+        if (string.IsNullOrWhiteSpace(_name))
+        {
+            return "El mapa necesita un nombre.";
+        }
+        if (string.IsNullOrWhiteSpace(_sourceEntity) || string.IsNullOrWhiteSpace(_targetEntity))
+        {
+            return "Definí la entidad de origen y la de destino.";
+        }
+        if (string.Equals(_sourceSystem, _targetSystem, StringComparison.OrdinalIgnoreCase))
+        {
+            return "El origen y el destino no pueden ser el mismo sistema.";
+        }
+        if (!_rows.Any(r => r.IsComplete))
+        {
+            return "Mapeá al menos un campo (origen y destino).";
+        }
+        if (_integrationKey.Count == 0)
+        {
+            return "Elegí al menos un campo destino como integration key.";
+        }
+        return null;
+    }
+
+    private void TogglePreview() =>
+        _jsonPreview = _jsonPreview is null
+            ? JsonSerializer.Serialize(BuildMap(_isNew ? 1 : _version + 1), JsonFileEntityMapStore.SerializerOptions)
+            : null;
+
+    /// <summary>Copia editable de un FieldMap. Los defaults se editan como texto; tipado fino: fase 4.</summary>
+    private sealed class FieldRow
+    {
+        public string Source = "";
+        public string Target = "";
+        public string Transform = "";
+        public string ValueMapText = "";
+        public string Default = "";
+
+        public bool IsComplete => Source.Trim().Length > 0 && Target.Trim().Length > 0;
+
+        public static FieldRow From(FieldMap f) => new()
+        {
+            Source = f.Source,
+            Target = f.Target,
+            Transform = f.Transform ?? "",
+            ValueMapText = f.ValueMap is null ? "" : string.Join('\n', f.ValueMap.Select(kv => $"{kv.Key}={kv.Value}")),
+            Default = f.DefaultValue?.ToString() ?? "",
+        };
+
+        public FieldMap ToFieldMap() => new()
+        {
+            Source = Source.Trim(),
+            Target = Target.Trim(),
+            Transform = string.IsNullOrWhiteSpace(Transform) ? null : Transform,
+            ValueMap = ParseValueMap(ValueMapText),
+            DefaultValue = string.IsNullOrWhiteSpace(Default) ? null : Default.Trim(),
+        };
+
+        private static IReadOnlyDictionary<string, string>? ParseValueMap(string text)
+        {
+            var pairs = text
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(line => line.Split('=', 2))
+                .Where(parts => parts.Length == 2)
+                .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim());
+            return pairs.Count == 0 ? null : pairs;
+        }
+    }
+}

@@ -1,0 +1,15 @@
+@page "/dlq"
+
+<PageTitle>Dead-letter — Axxon Integrator</PageTitle>
+
+<h1>Dead-letter</h1>
+
+<p>
+    Consola operativa (fase 4, primer slice): listar los mensajes muertos de la cola
+    <code>ingest</code> y de la suscripción <code>sync-engine</code>, inspeccionar el
+    payload y la razón, y reprocesar re-publicando al camino normal — el
+    last-writer-wins y la supresión de eco del pipeline protegen el reproceso de
+    duplicar o pisar datos nuevos.
+</p>
+
+<p class="placeholder">TODO: requiere <code>ServiceBusClient</code> con managed identity (receiver de DLQ + sender).</p>

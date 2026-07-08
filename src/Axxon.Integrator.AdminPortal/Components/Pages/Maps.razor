@@ -1,0 +1,54 @@
+@page "/"
+@page "/maps"
+@inject IEntityMapStore MapStore
+
+<PageTitle>Mapas — Axxon Integrator</PageTitle>
+
+<h1>Mapas de entidades</h1>
+<p class="toolbar"><a class="btn primary" href="/maps/new">Nuevo mapa</a></p>
+
+@if (_maps is null)
+{
+    <p>Cargando…</p>
+}
+else if (_maps.Count == 0)
+{
+    <p>No hay mapas todavía. Creá el primero con «Nuevo mapa».</p>
+}
+else
+{
+    <table class="grid">
+        <thead>
+            <tr>
+                <th>Mapa</th>
+                <th>Origen</th>
+                <th>Destino</th>
+                <th>Integration key</th>
+                <th>Empresas</th>
+                <th>Estado</th>
+                <th>v</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var map in _maps)
+            {
+                <tr>
+                    <td><a href="/maps/@map.Name">@map.Name</a></td>
+                    <td>@map.SourceSystem / @map.SourceEntity</td>
+                    <td>@map.TargetSystem / @map.TargetEntity</td>
+                    <td>@string.Join(" + ", map.IntegrationKey)</td>
+                    <td>@(map.Companies.Count == 0 ? "todas" : string.Join(", ", map.Companies))</td>
+                    <td><span class="status @map.Status.ToString().ToLowerInvariant()">@(map.Status == MapStatus.Active ? "Activo" : "Pausado")</span></td>
+                    <td>@map.Version</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private IReadOnlyList<EntityMap>? _maps;
+
+    protected override async Task OnInitializedAsync() =>
+        _maps = await MapStore.GetAllAsync(CancellationToken.None);
+}
