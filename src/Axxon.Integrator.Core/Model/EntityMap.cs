@@ -27,6 +27,22 @@ public sealed record EntityMap
     public required string TargetSystem { get; init; }
     public required string TargetEntity { get; init; }
 
+    /// <summary>
+    /// Identidad canónica del par de entidades, independiente de la dirección: los dos
+    /// mapas de un bidireccional (A→B y B→A) comparten PairKey y, con él, el vínculo
+    /// del xref y su estado de sync — requisito para que eco y last-writer-wins crucen
+    /// sistemas.
+    /// </summary>
+    public string PairKey
+    {
+        get
+        {
+            var sides = new[] { $"{SourceSystem}:{SourceEntity}", $"{TargetSystem}:{TargetEntity}" };
+            Array.Sort(sides, StringComparer.OrdinalIgnoreCase);
+            return string.Join("|", sides).ToLowerInvariant();
+        }
+    }
+
     public SyncDirection Direction { get; init; } = SyncDirection.OneWay;
     public MapStatus Status { get; init; } = MapStatus.Active;
 

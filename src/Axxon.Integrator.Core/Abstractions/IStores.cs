@@ -3,24 +3,73 @@ using Axxon.Integrator.Core.Model;
 namespace Axxon.Integrator.Core.Abstractions;
 
 /// <summary>
-/// Cross-reference de identidades: relaciona el ID nativo de un registro en cada
-/// sistema. Dual Write se apoya en GUIDs compartidos entre F&O y Dataverse; con un
-/// tercer sistema eso no existe, esta tabla es la fuente de verdad del vínculo.
+/// Cross-reference de identidades y estado de sincronización, por vínculo lógico.
+/// Dual Write se apoya en GUIDs compartidos entre F&O y Dataverse; con un tercer
+/// sistema eso no existe, esta tabla es la fuente de verdad del vínculo.
+///
+/// El estado vive en el vínculo (par de registros), no en cada lado: así la supresión
+/// de eco por contenido y el last-writer-wins funcionan entre sistemas — un evento de
+/// Dataverse se compara contra lo que el motor escribió viniendo de F&O, y viceversa.
 /// </summary>
 public interface IXrefStore
 {
-    /// <summary>Devuelve el ID del registro en <paramref name="targetSystem"/> vinculado al registro origen, o null si nunca se sincronizó.</summary>
-    Task<string?> ResolveAsync(string sourceSystem, string entityMapName, string sourceRecordId, string targetSystem, CancellationToken ct);
+    /// <summary>
+    /// Devuelve el vínculo al que pertenece el registro, buscando desde cualquiera de
+    /// los dos lados, o null si nunca se sincronizó.
+    /// </summary>
+    Task<XrefLink?> GetLinkAsync(string pairKey, string system, string recordId, CancellationToken ct);
 
-    Task LinkAsync(string entityMapName, string systemA, string recordIdA, string systemB, string recordIdB, CancellationToken ct);
-
-    /// <summary>Último estado sincronizado (hash del payload + timestamp). Base de la supresión de eco y del last-writer-wins.</summary>
-    Task<SyncState?> GetSyncStateAsync(string entityMapName, string sourceSystem, string sourceRecordId, CancellationToken ct);
-
-    Task SetSyncStateAsync(string entityMapName, string sourceSystem, string sourceRecordId, SyncState state, CancellationToken ct);
+    /// <summary>Crea o actualiza el vínculo (concurrencia optimista vía <see cref="XrefLink.ETag"/>).</summary>
+    Task SaveLinkAsync(XrefLink link, CancellationToken ct);
 }
 
-public sealed record SyncState(string PayloadHash, DateTimeOffset LastSyncedAt, string LastWriterSystem);
+/// <summary>
+/// Vínculo entre los dos registros que un par de entidades mantiene sincronizados,
+/// más el estado del último sync. En Cosmos se persiste como dos documentos espejo
+/// (uno por lado, point read por <c>pairKey|system|recordId</c>).
+/// </summary>
+public sealed record XrefLink
+{
+    /// <summary>Identidad canónica del par de entidades (ver <see cref="EntityMap.PairKey"/>).</summary>
+    public required string PairKey { get; init; }
+
+    public required string SystemA { get; init; }
+    public required string RecordIdA { get; init; }
+    public required string SystemB { get; init; }
+    public required string RecordIdB { get; init; }
+
+    public SyncState? State { get; init; }
+
+    /// <summary>ETag de Cosmos para concurrencia optimista entre las dos direcciones del sync.</summary>
+    public string? ETag { get; init; }
+
+    public string? RecordIdIn(string system) =>
+        string.Equals(system, SystemA, StringComparison.OrdinalIgnoreCase) ? RecordIdA
+        : string.Equals(system, SystemB, StringComparison.OrdinalIgnoreCase) ? RecordIdB
+        : null;
+}
+
+/// <summary>
+/// Estado del último sync del vínculo. Base de la supresión de eco por contenido y
+/// del last-writer-wins entre sistemas.
+/// </summary>
+public sealed record SyncState
+{
+    /// <summary>Sistema en el que el motor escribió por última vez. Un evento que llega desde este sistema es candidato a eco.</summary>
+    public required string WrittenToSystem { get; init; }
+
+    /// <summary>Campos escritos (esquema del destino). Permiten re-proyectar el evento-eco para compararlo por hash.</summary>
+    public required IReadOnlyList<string> WrittenFields { get; init; }
+
+    /// <summary>Hash canónico del payload escrito (ver <see cref="Sync.EchoGuard.ComputeHash"/>).</summary>
+    public required string WrittenPayloadHash { get; init; }
+
+    /// <summary>Sistema donde ocurrió el cambio de negocio que ganó el último sync.</summary>
+    public required string LastWriterSystem { get; init; }
+
+    /// <summary>OccurredAt del evento ganador. Cualquier evento del vínculo más viejo que esto pierde por last-writer-wins.</summary>
+    public required DateTimeOffset LastWriterOccurredAt { get; init; }
+}
 
 /// <summary>Acceso a la configuración de mapas (Cosmos DB en producción, JSON local en desarrollo).</summary>
 public interface IEntityMapStore
