@@ -209,6 +209,7 @@ managed identity del portal, sin API intermedia.
    mínima** en el portal (DLQ: ver + reprocesar; pausar/reanudar mapas) — no esperar a
    la fase 4: es lo primero que se necesita con el MVP vivo.
 3. **Sync inicial** con cutover (DMF / Durable Functions).
-4. **Portal completo**: diseñador con metadata en vivo de los conectores, métricas,
-   auth Entra ID (viewer/operator), Cosmos como store de mapas, App Service en Bicep.
+4. **Portal completo**: metadata en vivo de F&O ($metadata de OData; la de Dataverse
+   ya está implementada), métricas, auth Entra ID (viewer/operator), Cosmos como store
+   de mapas, App Service en Bicep.
 5. **Tercer conector** (SQL o REST genérico): prueba de fuego de la abstracción `IConnector`.
