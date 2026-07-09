@@ -4,6 +4,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- ClientSecrets de desarrollo via `dotnet user-secrets set`, nunca en appsettings -->
+    <UserSecretsId>axxon-integrator-adminportal</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

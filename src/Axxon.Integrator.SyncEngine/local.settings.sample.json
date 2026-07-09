@@ -1,0 +1,25 @@
+{
+  "$comment": "Plantilla para desarrollo local del SyncEngine. Copiar como local.settings.json (gitignored) y completar. En Azure estos valores los pone el Bicep: los no-secretos como parámetros y los ClientSecret como referencias a Key Vault.",
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+
+    "ServiceBusConnection__fullyQualifiedNamespace": "axxonint-dev-sb.servicebus.windows.net",
+    "Sync:IngestQueue": "ingest",
+    "Sync:ChangesTopic": "changes",
+    "Sync:EngineSubscription": "sync-engine",
+
+    "Dataverse__EnvironmentUrl": "https://<org>.crm.dynamics.com",
+    "Dataverse__TenantId": "",
+    "Dataverse__ClientId": "",
+    "Dataverse__ClientSecret": "",
+    "Dataverse__IntegrationUserId": "",
+
+    "FinOps__EnvironmentUrl": "https://<ambiente>.operations.dynamics.com",
+    "FinOps__TenantId": "",
+    "FinOps__ClientId": "",
+    "FinOps__ClientSecret": "",
+    "FinOps__IntegrationUserId": ""
+  }
+}
