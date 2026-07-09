@@ -6,6 +6,8 @@
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
 
     "ServiceBusConnection__fullyQualifiedNamespace": "axxonint-dev-sb.servicebus.windows.net",
+    "Maps__Directory": "",
+    "Maps__BlobContainerUri": "",
     "Sync:IngestQueue": "ingest",
     "Sync:ChangesTopic": "changes",
     "Sync:EngineSubscription": "sync-engine",

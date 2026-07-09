@@ -133,17 +133,61 @@ public sealed class FinOpsMetadataTests
         Assert.Contains("FinOps:EnvironmentUrl", ex.Message);
     }
 
+    [Fact]
+    public async Task Enum_field_fetches_public_enumeration_members()
+    {
+        var stub = new StubHandler(
+            (HttpStatusCode.OK, PublicEntitiesJson),
+            (HttpStatusCode.OK, """
+            {
+              "Name": "NoYes",
+              "Members": [
+                { "Name": "No", "Value": 0 },
+                { "Name": "Yes", "Value": 1 }
+              ]
+            }
+            """));
+        var connector = ConnectorWith(stub);
+
+        var options = await connector.GetOptionSetAsync("CustomersV3", "IsOneTimeCustomer", CancellationToken.None);
+
+        // OData escribe enums por nombre de miembro: Name como clave y etiqueta
+        Assert.Equal(["No", "Yes"], options.Keys);
+        Assert.Equal(2, stub.Requests.Count);
+        Assert.Contains("PublicEnumerations('NoYes')", stub.Requests[1].RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task Primitive_field_returns_empty_without_enum_request()
+    {
+        var stub = new StubHandler(HttpStatusCode.OK, PublicEntitiesJson);
+        var connector = ConnectorWith(stub);
+
+        var options = await connector.GetOptionSetAsync("CustomersV3", "OrganizationName", CancellationToken.None);
+
+        Assert.Empty(options);
+        Assert.Single(stub.Requests); // Edm.String: nunca consulta PublicEnumerations
+    }
+
     private static FinOpsConnector ConnectorWith(StubHandler stub) => new(
         new HttpClient(stub) { BaseAddress = new Uri("https://unit.test/") },
         new EntraAppOptions { EnvironmentUrl = "https://unit.test" });
 
-    private sealed class StubHandler(HttpStatusCode status, string body) : HttpMessageHandler
+    private sealed class StubHandler : HttpMessageHandler
     {
+        private readonly Queue<(HttpStatusCode Status, string Body)> _responses;
+
+        public StubHandler(HttpStatusCode status, string body) : this((status, body)) { }
+
+        public StubHandler(params (HttpStatusCode Status, string Body)[] responses) =>
+            _responses = new(responses);
+
         public List<HttpRequestMessage> Requests { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             Requests.Add(request);
+            var (status, body) = _responses.Count > 1 ? _responses.Dequeue() : _responses.Peek();
             return Task.FromResult(new HttpResponseMessage(status)
             {
                 Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),

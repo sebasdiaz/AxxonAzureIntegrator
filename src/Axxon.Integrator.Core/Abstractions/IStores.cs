@@ -72,10 +72,10 @@ public sealed record SyncState
 }
 
 /// <summary>
-/// Acceso a la configuración de mapas: documentos JSON versionados (Cosmos DB en
-/// producción, archivos locales en desarrollo). Un bidireccional se modela como dos
-/// mapas direccionales que comparten <see cref="EntityMap.PairKey"/>.
-/// El motor solo lee; el portal de administración escribe.
+/// Acceso a la configuración de mapas: documentos JSON planos (Blob Storage en
+/// producción, archivos locales en desarrollo — el mismo documento). Un bidireccional
+/// se modela como dos mapas direccionales que comparten <see cref="EntityMap.PairKey"/>.
+/// El motor solo lee (detrás de un caché en memoria); el portal escribe.
 /// </summary>
 public interface IEntityMapStore
 {
@@ -89,6 +89,13 @@ public interface IEntityMapStore
 
     /// <summary>Crea o reemplaza el documento del mapa (el diseñador incrementa <see cref="EntityMap.Version"/>).</summary>
     Task SaveAsync(EntityMap map, CancellationToken ct);
+
+    /// <summary>
+    /// Elimina el documento del mapa. Idempotente: eliminar un mapa inexistente no es
+    /// error. Los vínculos del xref que el mapa haya creado se conservan (histórico
+    /// inocuo; si el mapa se recrea, se reutilizan).
+    /// </summary>
+    Task DeleteAsync(string name, CancellationToken ct);
 }
 
 /// <summary>Persistencia de watermarks para polling y sync inicial.</summary>

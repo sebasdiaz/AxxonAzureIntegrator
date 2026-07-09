@@ -75,7 +75,8 @@ resource engineSubscription 'Microsoft.ServiceBus/namespaces/topics/subscription
   }
 }
 
-// --- Cosmos DB: mapas, xref, watermarks -----------------------------------
+// --- Cosmos DB: xref (vínculos + estado) y watermarks ----------------------
+// Los mapas NO viven acá: son blobs JSON en el storage account (más abajo).
 resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2023-11-15' = {
   name: '${name}-cosmos'
   location: location
@@ -99,17 +100,6 @@ resource cosmosDb 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases@2023-11-15
   name: 'integrator'
   properties: {
     resource: { id: 'integrator' }
-  }
-}
-
-resource mapsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2023-11-15' = {
-  parent: cosmosDb
-  name: 'entity-maps'
-  properties: {
-    resource: {
-      id: 'entity-maps'
-      partitionKey: { paths: ['/sourceSystem'], kind: 'Hash' }
-    }
   }
 }
 
@@ -168,6 +158,23 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
   kind: 'StorageV2'
 }
 
+// Los mapas de entidades viven como blobs JSON planos (decisión 13): un blob por
+// mapa en 'entity-maps'. El versioning del blob service conserva la historia de
+// cada guardado del diseñador; el acceso es por managed identity con el rol
+// Storage Blob Data Contributor (pendiente junto con el resto del RBAC).
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-01-01' = {
+  parent: storage
+  name: 'default'
+  properties: {
+    isVersioningEnabled: true
+  }
+}
+
+resource entityMapsContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01' = {
+  parent: blobService
+  name: 'entity-maps'
+}
+
 resource plan 'Microsoft.Web/serverfarms@2023-01-01' = {
   name: '${name}-plan'
   location: location
@@ -197,6 +204,7 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'Sync:IngestQueue', value: ingestQueue.name }
         { name: 'Sync:ChangesTopic', value: changesTopic.name }
         { name: 'Sync:EngineSubscription', value: engineSubscription.name }
+        { name: 'Maps__BlobContainerUri', value: 'https://${storage.name}.blob.${environment().suffixes.storage}/${entityMapsContainer.name}' }
         // App registrations (decisión 14). Secrets por referencia de Key Vault:
         // requiere el rol Key Vault Secrets User sobre la managed identity (pendiente
         // junto con el resto del RBAC).

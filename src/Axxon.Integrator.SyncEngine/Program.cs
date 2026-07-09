@@ -2,7 +2,10 @@ using Axxon.Integrator.Azure;
 using Axxon.Integrator.Connectors.Dataverse;
 using Axxon.Integrator.Connectors.FinOps;
 using Axxon.Integrator.Core.Abstractions;
+using Axxon.Integrator.Core.Stores;
 using Axxon.Integrator.Core.Sync;
+using global::Azure.Identity;
+using global::Azure.Storage.Blobs;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -37,8 +40,24 @@ var builder = new HostBuilder()
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase)));
 
-        // TODO(MVP): stores sobre Cosmos DB y sender del topic para el IngestProcessor.
-        // services.AddSingleton<IEntityMapStore, CosmosEntityMapStore>();
+        // Mapas: blobs en 'entity-maps' cuando hay Maps:BlobContainerUri (producción,
+        // managed identity), archivos locales si no (desarrollo). TODO(fase 1): caché
+        // en memoria delante del store — el pipeline no debe listar blobs por evento.
+        var mapsBlobUri = context.Configuration["Maps:BlobContainerUri"];
+        if (!string.IsNullOrWhiteSpace(mapsBlobUri))
+        {
+            services.AddSingleton<IEntityMapStore>(_ => new BlobEntityMapStore(
+                new BlobContainerClient(new Uri(mapsBlobUri), new DefaultAzureCredential())));
+        }
+        else
+        {
+            var mapsDirectory = context.Configuration["Maps:Directory"];
+            services.AddSingleton<IEntityMapStore>(_ => new JsonFileEntityMapStore(
+                string.IsNullOrWhiteSpace(mapsDirectory) ? "maps" : mapsDirectory));
+        }
+
+        // TODO(MVP): stores de Cosmos (xref + watermarks) y sender del topic para el
+        // IngestProcessor.
         // services.AddSingleton<IXrefStore, CosmosXrefStore>();
         // services.AddSingleton<IWatermarkStore, CosmosWatermarkStore>();
         // services.AddSingleton(sp => serviceBusClient.CreateSender(changesTopicName));

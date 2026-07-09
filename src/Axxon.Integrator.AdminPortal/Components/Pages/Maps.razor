@@ -27,19 +27,32 @@ else
                 <th>Empresas</th>
                 <th>Estado</th>
                 <th>v</th>
+                <th></th>
             </tr>
         </thead>
         <tbody>
             @foreach (var map in _maps)
             {
+                var m = map;
                 <tr>
-                    <td><a href="/maps/@map.Name">@map.Name</a></td>
-                    <td>@map.SourceSystem / @map.SourceEntity</td>
-                    <td>@map.TargetSystem / @map.TargetEntity</td>
-                    <td>@string.Join(" + ", map.IntegrationKey)</td>
-                    <td>@(map.Companies.Count == 0 ? "todas" : string.Join(", ", map.Companies))</td>
-                    <td><span class="status @map.Status.ToString().ToLowerInvariant()">@(map.Status == MapStatus.Active ? "Activo" : "Pausado")</span></td>
-                    <td>@map.Version</td>
+                    <td><a href="/maps/@m.Name">@m.Name</a></td>
+                    <td>@m.SourceSystem / @m.SourceEntity</td>
+                    <td>@m.TargetSystem / @m.TargetEntity</td>
+                    <td>@string.Join(" + ", m.IntegrationKey)</td>
+                    <td>@(m.Companies.Count == 0 ? "todas" : string.Join(", ", m.Companies))</td>
+                    <td><span class="status @m.Status.ToString().ToLowerInvariant()">@(m.Status == MapStatus.Active ? "Activo" : "Pausado")</span></td>
+                    <td>@m.Version</td>
+                    <td class="row-actions">
+                        @if (_pendingDelete == m.Name)
+                        {
+                            <button class="btn danger" @onclick="() => DeleteAsync(m.Name)">Confirmar</button>
+                            <button class="btn" @onclick="() => _pendingDelete = null">Cancelar</button>
+                        }
+                        else
+                        {
+                            <button class="btn danger" @onclick="() => _pendingDelete = m.Name">Eliminar</button>
+                        }
+                    </td>
                 </tr>
             }
         </tbody>
@@ -48,7 +61,17 @@ else
 
 @code {
     private IReadOnlyList<EntityMap>? _maps;
+    private string? _pendingDelete;
 
     protected override async Task OnInitializedAsync() =>
         _maps = await MapStore.GetAllAsync(CancellationToken.None);
+
+    private async Task DeleteAsync(string name)
+    {
+        // La detención del sync es inmediata al refresco del caché del motor; los
+        // vínculos del xref se conservan (ver IEntityMapStore.DeleteAsync).
+        await MapStore.DeleteAsync(name, CancellationToken.None);
+        _pendingDelete = null;
+        _maps = await MapStore.GetAllAsync(CancellationToken.None);
+    }
 }
