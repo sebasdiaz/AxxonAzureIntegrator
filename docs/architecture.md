@@ -21,6 +21,7 @@ y sin desarrollo sobre F&O.
 | 11 | Errores **permanentes → DLQ directa; transitorios → re-encolado programado con backoff** | El trigger de Service Bus reintenta sin backoff (y las retry policies de Functions no aplican a este trigger): con el destino caído, `MaxDeliveryCount` se quema en segundos y todo termina en la DLQ — lo contrario de "esperar en la cola". El re-encolado con `ScheduledEnqueueTime` implementa la espera; el desorden que introduce lo absorbe el last-writer-wins. |
 | 12 | Portal de administración en **Blazor**, referenciando `Core` directamente | El diseñador de mapas edita los mismos records `EntityMap`/`FieldMap` que consume el motor — misma validación, cero capa de traducción. Server-side habla con Cosmos/Service Bus/App Insights vía managed identity, sin API intermedia. Se descartó model-driven Power App: acoplaría el control plane a uno de los sistemas integrados, y la mitad operativa (DLQ, métricas) igual exigiría UI custom. |
 | 13 | Mapas persistidos como **documentos JSON** (integration keys compuestas incluidas) | Legibles, diffeables, portables entre ambientes (export/import = copiar el archivo). El mismo documento es el formato local de desarrollo (`JsonFileEntityMapStore`) y el de Cosmos DB en producción. Integration key como lista de campos del destino, paridad con Dual Write. |
+| 14 | Escritura en Dataverse y F&O con **app registrations de Entra ID** (client credentials); managed identity para todo lo interno de Azure; secretos solo donde un tercero los impone, siempre en Key Vault | Una app registration por sistema, detrás de un application user (Dataverse) / usuario de servicio (F&O) con permisos acotados a las entidades de los mapas. Esa misma identidad es la que el sistema reporta como originador de nuestras escrituras → su ID alimenta la lista de usuarios de integración del `EchoGuard`: credencial de escritura y defensa primaria anti-loop son la misma cosa. |
 
 ## Diagrama
 
@@ -110,6 +111,27 @@ Notas de diseño:
   que el sistema reporta queda para la fase 2; un falso negativo no pierde datos porque
   la defensa por identidad contiene el loop y el upsert es idempotente.
 
+## Autenticación
+
+Cuatro relaciones distintas; conviene no mezclarlas:
+
+| Relación | Mecanismo | Identidad / secreto |
+|----------|-----------|---------------------|
+| F&O → cola `ingest` | F&O se autentica contra Service Bus con una app registration y exige la connection string del bus en **Key Vault** (Get/List para esa app). Único secreto inevitable del diseño: lo impone F&O. | App registration del endpoint de eventos + secret en KV |
+| Dataverse → cola `ingest` | Service endpoint registrado con **SAS** dedicada, permiso *Send* solo sobre `ingest` (nunca la root key). | SAS policy `ingest-send` |
+| Motor → Dataverse (Web API) y → F&O (OData) | **Client credentials** de una app registration por sistema (`EntraBearerHandler`: token cacheado, renovación con margen). En Dataverse: application user con rol acotado. En F&O: registrar la app en *Sys admin → Microsoft Entra applications* con un usuario de servicio. Scope = `{EnvironmentUrl}/.default`. | Secciones de config `Dataverse` / `FinOps` (`EnvironmentUrl`, `TenantId`, `ClientId`, `ClientSecret` vía KV, `IntegrationUserId`) |
+| Motor y portal → Azure (Service Bus, Cosmos, KV, App Insights) | **Managed identity** (conexión identity-based, sin connection strings). Roles pendientes: SB Data Receiver/Sender, Cosmos Built-in Data Contributor, KV Secrets User. El portal suma auth de usuarios: Entra ID, roles viewer/operator (fase 4). | Identidad system-assigned de cada app |
+
+El `IntegrationUserId` de cada app registration (systemuserid del application user en
+Dataverse, usuario de servicio en F&O) se inyecta en el `EchoGuard` al componer los
+hosts: los eventos-eco que nuestras escrituras generan vienen firmados por esas
+identidades. Sin credenciales configuradas, los hosts arrancan igual (desarrollo
+local): el error claro aparece recién al usar un conector.
+
+Endurecimiento futuro (sin cambio de código): reemplazar los client secrets por
+**federated identity credentials** — la managed identity del host federada a la app
+registration — y el esquema queda completamente secretless salvo el endpoint de F&O.
+
 ## Portal de administración
 
 Proyecto Blazor (`Axxon.Integrator.AdminPortal`) que referencia `Core`: edita los
@@ -173,6 +195,7 @@ managed identity del portal, sin API intermedia.
 | `Axxon.Integrator.Connectors.Dataverse` | Parser de service endpoints + escritura Web API + change tracking. |
 | `Axxon.Integrator.SyncEngine` | Azure Functions (isolated, .NET 8): `IngestProcessor` (normaliza y estampa sesión/dedup) y `ChangeEventProcessor` (ejecuta el pipeline). |
 | `Axxon.Integrator.AdminPortal` | Blazor (server): diseñador de mapas, DLQ, métricas. Referencia `Core` — mismos modelos y validación que el motor. |
+| `Axxon.Integrator.Azure` | Infraestructura Azure compartida: auth Entra (`EntraAppOptions`, `EntraBearerHandler`); futuro hogar de los stores de Cosmos. |
 | `infra/` | Bicep: Service Bus (cola `ingest` + topic `changes`), Cosmos DB, Function App, Key Vault, App Insights. Falta: App Service del portal. |
 
 ## Fases
