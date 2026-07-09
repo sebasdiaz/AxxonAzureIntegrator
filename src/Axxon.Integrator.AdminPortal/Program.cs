@@ -1,5 +1,7 @@
 using Axxon.Integrator.AdminPortal.Components;
 using Axxon.Integrator.Azure;
+using global::Azure.Identity;
+using global::Azure.Storage.Blobs;
 using Axxon.Integrator.Connectors.Dataverse;
 using Axxon.Integrator.Connectors.FinOps;
 using Axxon.Integrator.Core.Abstractions;
@@ -23,17 +25,27 @@ builder.Services.AddSingleton<IReadOnlyDictionary<string, IConnector>>(sp =>
     sp.GetServices<IConnector>().ToDictionary(c => c.SystemName));
 builder.Services.AddSingleton<MappingEngine>();
 
-// Mapas como documentos JSON: archivos locales en desarrollo; en producción el mismo
-// documento vive en Cosmos DB. TODO(fase 4): CosmosEntityMapStore + autenticación
-// Entra ID con roles viewer/operator.
-// Vacío cuenta como no-configurado: el template de appsettings trae "" y con ?? solo
-// el null caería al default, dejando el store apuntando a la nada.
-var mapsDirectory = builder.Configuration["Maps:Directory"];
-if (string.IsNullOrWhiteSpace(mapsDirectory))
+// Mapas como documentos JSON planos: blobs en 'entity-maps' cuando hay
+// Maps:BlobContainerUri (producción, managed identity), archivos locales si no
+// (desarrollo). Mismo documento en ambos. TODO(fase 4): auth Entra ID con roles
+// viewer/operator.
+// Vacío cuenta como no-configurado: los templates traen "" y con ?? solo el null
+// caería al default.
+var mapsBlobUri = builder.Configuration["Maps:BlobContainerUri"];
+if (!string.IsNullOrWhiteSpace(mapsBlobUri))
 {
-    mapsDirectory = Path.Combine(builder.Environment.ContentRootPath, "maps");
+    builder.Services.AddSingleton<IEntityMapStore>(_ => new BlobEntityMapStore(
+        new BlobContainerClient(new Uri(mapsBlobUri), new DefaultAzureCredential())));
 }
-builder.Services.AddSingleton<IEntityMapStore>(_ => new JsonFileEntityMapStore(mapsDirectory));
+else
+{
+    var mapsDirectory = builder.Configuration["Maps:Directory"];
+    if (string.IsNullOrWhiteSpace(mapsDirectory))
+    {
+        mapsDirectory = Path.Combine(builder.Environment.ContentRootPath, "maps");
+    }
+    builder.Services.AddSingleton<IEntityMapStore>(_ => new JsonFileEntityMapStore(mapsDirectory));
+}
 
 var app = builder.Build();
 

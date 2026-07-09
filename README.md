@@ -16,7 +16,7 @@ src/
   Axxon.Integrator.SyncEngine/           Azure Functions (.NET 8 isolated)
   Axxon.Integrator.AdminPortal/          Portal Blazor: diseñador de mapas, DLQ, métricas
 infra/
-  main.bicep                             Service Bus, Cosmos, Function App, Key Vault, App Insights
+  main.bicep                             Service Bus, Cosmos (xref), Blob (mapas), Function App, Key Vault, App Insights
 docs/
   architecture.md                        Decisiones de diseño y flujos
 ```
@@ -34,8 +34,8 @@ dotnet run --project src/Axxon.Integrator.AdminPortal
 ```
 
 Diseñador de mapas estilo Dual Write (campos, transformaciones, value maps,
-integration key compuesta) persistiendo documentos JSON en `maps/` (Cosmos DB en
-producción, mismo formato).
+integration key compuesta) persistiendo documentos JSON en `maps/` (en producción,
+blobs en el container `entity-maps` con versioning — mismo documento).
 
 ## Estado
 

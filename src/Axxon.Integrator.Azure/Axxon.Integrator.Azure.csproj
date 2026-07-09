@@ -8,6 +8,11 @@
 
   <ItemGroup>
     <PackageReference Include="Azure.Identity" Version="1.12.1" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.21.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Axxon.Integrator.Core\Axxon.Integrator.Core.csproj" />
   </ItemGroup>
 
 </Project>

@@ -8,8 +8,9 @@ namespace Axxon.Integrator.Core.Stores;
 /// <summary>
 /// Store de mapas sobre archivos JSON locales (un archivo por mapa, nombre = nombre
 /// del mapa). Es el store de desarrollo y la referencia del formato del documento:
-/// el store de Cosmos persiste exactamente el mismo JSON. Enums como texto y
-/// camelCase para que el documento sea legible/editable a mano.
+/// el store de blobs de producción persiste exactamente el mismo JSON con el mismo
+/// nombre. Enums como texto y camelCase para que el documento sea legible/editable
+/// a mano.
 /// </summary>
 public sealed class JsonFileEntityMapStore(string directory) : IEntityMapStore
 {

@@ -13,14 +13,14 @@ y sin desarrollo sobre F&O.
 | 3 | Escritura en F&O vía **OData** sobre data entities | Tampoco requiere X++. Upsert idempotente con clave de entidad. |
 | 4 | **Azure Service Bus** como backbone (no Event Grid solo) | Sesiones (orden por registro), dead-letter queue, duplicate detection, entrega programada (backoff). |
 | 5 | **Sync inicial por DMF**, nunca por data events | Límite documentado: ~5.000 eventos/5 min y ~50.000/hora por ambiente F&O. |
-| 6 | Mapas de entidades como **configuración versionada** (Cosmos DB), no código | Un consultor configura una integración sin deploy. Equivalente a las table maps de Dual Write. |
+| 6 | Mapas de entidades como **configuración versionada** (Blob Storage), no código | Un consultor configura una integración sin deploy. Equivalente a las table maps de Dual Write. |
 | 7 | Tabla de **cross-reference de IDs** propia | Dual Write depende de GUIDs compartidos F&O/Dataverse; con un tercer sistema eso no existe. |
 | 8 | Todo sistema se integra implementando **`IConnector`** | La extensibilidad más allá de F&O/Dataverse es objetivo de primer orden. |
 | 9 | Estado de sync **por vínculo lógico** (par del xref), no por lado | Si el estado se guarda por `(sistema, registro)`, cada dirección solo ve su propia historia: el eco por contenido nunca dispara (esquemas distintos, claves distintas) y un conflicto real F&O↔Dataverse nunca se detecta. El vínculo — identificado por el `PairKey` del par de entidades — es la unidad donde eco y last-writer-wins tienen sentido. |
 | 10 | **Cola de ingesta + re-publish normalizado** delante del topic | Los endpoints de business events de F&O y los service endpoints de Dataverse **no permiten estampar `SessionId` ni `MessageId`**; publicar directo a una suscripción con sesiones dejaría mensajes inconsumibles. El salto de ingesta parsea al `ChangeEvent` normalizado, estampa `SessionId` (orden por registro) y `MessageId` determinístico (dedup real), y aísla los payloads corruptos en su propia DLQ. |
 | 11 | Errores **permanentes → DLQ directa; transitorios → re-encolado programado con backoff** | El trigger de Service Bus reintenta sin backoff (y las retry policies de Functions no aplican a este trigger): con el destino caído, `MaxDeliveryCount` se quema en segundos y todo termina en la DLQ — lo contrario de "esperar en la cola". El re-encolado con `ScheduledEnqueueTime` implementa la espera; el desorden que introduce lo absorbe el last-writer-wins. |
 | 12 | Portal de administración en **Blazor**, referenciando `Core` directamente | El diseñador de mapas edita los mismos records `EntityMap`/`FieldMap` que consume el motor — misma validación, cero capa de traducción. Server-side habla con Cosmos/Service Bus/App Insights vía managed identity, sin API intermedia. Se descartó model-driven Power App: acoplaría el control plane a uno de los sistemas integrados, y la mitad operativa (DLQ, métricas) igual exigiría UI custom. |
-| 13 | Mapas persistidos como **documentos JSON** (integration keys compuestas incluidas) | Legibles, diffeables, portables entre ambientes (export/import = copiar el archivo). El mismo documento es el formato local de desarrollo (`JsonFileEntityMapStore`) y el de Cosmos DB en producción. Integration key como lista de campos del destino, paridad con Dual Write. |
+| 13 | Mapas persistidos como **documentos JSON planos en Blob Storage** (integration keys compuestas incluidas) | Legibles, diffeables, portables entre ambientes (export/import = copiar el archivo — blob y archivo local son el mismo documento). El **versioning nativo del blob service** conserva la historia de cada guardado y los ETags dan concurrencia optimista, gratis; en Cosmos ambas cosas había que construirlas. Cosmos queda para lo que sí es trabajo de base de datos: xref y watermarks. Integration key como lista de campos del destino, paridad con Dual Write. |
 | 14 | Escritura en Dataverse y F&O con **app registrations de Entra ID** (client credentials); managed identity para todo lo interno de Azure; secretos solo donde un tercero los impone, siempre en Key Vault | Una app registration por sistema, detrás de un application user (Dataverse) / usuario de servicio (F&O) con permisos acotados a las entidades de los mapas. Esa misma identidad es la que el sistema reporta como originador de nuestras escrituras → su ID alimenta la lista de usuarios de integración del `EchoGuard`: credencial de escritura y defensa primaria anti-loop son la misma cosa. |
 
 ## Diagrama
@@ -35,7 +35,7 @@ flowchart TB
     INGF["IngestProcessor (Function)\nparse → SessionId → MessageId determinístico"] --> SB
     SB["Service Bus topic 'changes'\nChangeEvent normalizado · sesiones · dedup · DLQ"] --> ENGINE
     ENGINE["Motor de sincronización (Functions)\nfiltro → vínculo → eco → conflicto → mapeo → upsert"] --> CONN
-    ENGINE -.-> MAPS[("Config de mapas\nJSON en Cosmos DB")]
+    ENGINE -.-> MAPS[("Config de mapas\nJSON en Blob Storage\n(caché en memoria)")]
     ENGINE -.-> XREF[("Vínculos xref + estado\nCosmos DB")]
     ENGINE -.-> AI[("App Insights")]
     PORTAL["Portal de administración (Blazor)\ndiseñador de mapas · DLQ · métricas"] -.-> MAPS
@@ -120,7 +120,7 @@ Cuatro relaciones distintas; conviene no mezclarlas:
 | F&O → cola `ingest` | F&O se autentica contra Service Bus con una app registration y exige la connection string del bus en **Key Vault** (Get/List para esa app). Único secreto inevitable del diseño: lo impone F&O. | App registration del endpoint de eventos + secret en KV |
 | Dataverse → cola `ingest` | Service endpoint registrado con **SAS** dedicada, permiso *Send* solo sobre `ingest` (nunca la root key). | SAS policy `ingest-send` |
 | Motor → Dataverse (Web API) y → F&O (OData) | **Client credentials** de una app registration por sistema (`EntraBearerHandler`: token cacheado, renovación con margen). En Dataverse: application user con rol acotado. En F&O: registrar la app en *Sys admin → Microsoft Entra applications* con un usuario de servicio. Scope = `{EnvironmentUrl}/.default`. | Secciones de config `Dataverse` / `FinOps` (`EnvironmentUrl`, `TenantId`, `ClientId`, `ClientSecret` vía KV, `IntegrationUserId`) |
-| Motor y portal → Azure (Service Bus, Cosmos, KV, App Insights) | **Managed identity** (conexión identity-based, sin connection strings). Roles pendientes: SB Data Receiver/Sender, Cosmos Built-in Data Contributor, KV Secrets User. El portal suma auth de usuarios: Entra ID, roles viewer/operator (fase 4). | Identidad system-assigned de cada app |
+| Motor y portal → Azure (Service Bus, Cosmos, Blob, KV, App Insights) | **Managed identity** (conexión identity-based, sin connection strings). Roles pendientes: SB Data Receiver/Sender, Cosmos Built-in Data Contributor, Storage Blob Data Contributor (mapas), KV Secrets User. El portal suma auth de usuarios: Entra ID, roles viewer/operator (fase 4). | Identidad system-assigned de cada app |
 
 El `IntegrationUserId` de cada app registration (systemuserid del application user en
 Dataverse, usuario de servicio en F&O) se inyecta en el `EchoGuard` al componer los
@@ -143,8 +143,8 @@ mismos records que consume el motor, con la misma validación. Tres áreas:
   registradas en el `MappingEngine`, value maps para option sets, defaults, filtro por
   empresas, e **integration key compuesta** elegida entre los campos destino mapeados.
   Guardar incrementa la versión y persiste el documento JSON (vista previa del JSON en
-  la propia UI; el archivo local de desarrollo y el documento de Cosmos son el mismo
-  formato).
+  la propia UI; el archivo local de desarrollo y el blob de producción son el mismo
+  documento — el blob service además conserva cada versión anterior).
 - **Dead-letter**: listar/inspeccionar/reprocesar. El reproceso re-publica el mensaje
   al camino normal (cola `ingest` o topic según de dónde venga): el last-writer-wins y
   la supresión de eco lo protegen de duplicar o pisar datos nuevos. La UI orquesta; no
@@ -195,8 +195,8 @@ managed identity del portal, sin API intermedia.
 | `Axxon.Integrator.Connectors.Dataverse` | Parser de service endpoints + escritura Web API + change tracking. |
 | `Axxon.Integrator.SyncEngine` | Azure Functions (isolated, .NET 8): `IngestProcessor` (normaliza y estampa sesión/dedup) y `ChangeEventProcessor` (ejecuta el pipeline). |
 | `Axxon.Integrator.AdminPortal` | Blazor (server): diseñador de mapas, DLQ, métricas. Referencia `Core` — mismos modelos y validación que el motor. |
-| `Axxon.Integrator.Azure` | Infraestructura Azure compartida: auth Entra (`EntraAppOptions`, `EntraBearerHandler`); futuro hogar de los stores de Cosmos. |
-| `infra/` | Bicep: Service Bus (cola `ingest` + topic `changes`), Cosmos DB, Function App, Key Vault, App Insights. Falta: App Service del portal. |
+| `Axxon.Integrator.Azure` | Infraestructura Azure compartida: auth Entra (`EntraAppOptions`, `EntraBearerHandler`), `BlobEntityMapStore`; futuro hogar de los stores de Cosmos (xref, watermarks). |
+| `infra/` | Bicep: Service Bus (cola `ingest` + topic `changes`), Cosmos DB (xref), Blob Storage (mapas, con versioning), Function App, Key Vault, App Insights. Falta: App Service del portal. |
 
 ## Fases
 
@@ -209,7 +209,7 @@ managed identity del portal, sin API intermedia.
    mínima** en el portal (DLQ: ver + reprocesar; pausar/reanudar mapas) — no esperar a
    la fase 4: es lo primero que se necesita con el MVP vivo.
 3. **Sync inicial** con cutover (DMF / Durable Functions).
-4. **Portal completo**: métricas, auth Entra ID (viewer/operator), Cosmos como store
-   de mapas, App Service en Bicep. (La metadata en vivo de ambos conectores —
-   EntityDefinitions en Dataverse, Metadata service en F&O — ya está implementada.)
+4. **Portal completo**: métricas, auth Entra ID (viewer/operator), App Service en
+   Bicep, ETag condicional al guardar mapas (multiusuario). (La metadata en vivo de
+   ambos conectores y el store de mapas en blob ya están implementados.)
 5. **Tercer conector** (SQL o REST genérico): prueba de fuego de la abstracción `IConnector`.
