@@ -1,0 +1,54 @@
+{
+  "name": "Customer groups (msdyn_customergroups)",
+  "sourceSystem": "finops",
+  "sourceEntity": "CustomerGroups",
+  "targetSystem": "dataverse",
+  "targetEntity": "msdyn_customergroup",
+  "direction": "oneWay",
+  "status": "active",
+  "companies": [
+    "ALAS",
+    "ATLA"
+  ],
+  "fields": [
+    {
+      "source": "CustomerGroupId",
+      "target": "msdyn_groupid",
+      "transform": null,
+      "valueMap": null,
+      "defaultValue": null
+    },
+    {
+      "source": "Description",
+      "target": "msdyn_description",
+      "transform": null,
+      "valueMap": null,
+      "defaultValue": null
+    },
+    {
+      "source": "IsSalesTaxIncludedInPrice",
+      "target": "msdyn_issalestaxincludedinprice",
+      "transform": null,
+      "valueMap": null,
+      "defaultValue": null
+    },
+    {
+      "source": "PaymentTermId",
+      "target": "msdyn_paymenttermid",
+      "transform": null,
+      "valueMap": null,
+      "defaultValue": null
+    },
+    {
+      "source": "ClearingPeriodPaymentTermName",
+      "target": "msdyn_clearingperiodpaymenttermname",
+      "transform": null,
+      "valueMap": null,
+      "defaultValue": null
+    }
+  ],
+  "integrationKey": [
+    "msdyn_groupid"
+  ],
+  "version": 1
+}
