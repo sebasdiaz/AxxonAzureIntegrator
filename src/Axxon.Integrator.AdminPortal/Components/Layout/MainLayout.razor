@@ -1,0 +1,13 @@
+@inherits LayoutComponentBase
+
+<div class="layout">
+    <nav class="sidebar">
+        <div class="brand">Axxon Integrator</div>
+        <NavLink href="/maps">Mapas</NavLink>
+        <NavLink href="/dlq">Dead-letter</NavLink>
+        <NavLink href="/metrics">Métricas</NavLink>
+    </nav>
+    <main class="content">
+        @Body
+    </main>
+</div>

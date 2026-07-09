@@ -19,6 +19,8 @@ y sin desarrollo sobre F&O.
 | 9 | Estado de sync **por vínculo lógico** (par del xref), no por lado | Si el estado se guarda por `(sistema, registro)`, cada dirección solo ve su propia historia: el eco por contenido nunca dispara (esquemas distintos, claves distintas) y un conflicto real F&O↔Dataverse nunca se detecta. El vínculo — identificado por el `PairKey` del par de entidades — es la unidad donde eco y last-writer-wins tienen sentido. |
 | 10 | **Cola de ingesta + re-publish normalizado** delante del topic | Los endpoints de business events de F&O y los service endpoints de Dataverse **no permiten estampar `SessionId` ni `MessageId`**; publicar directo a una suscripción con sesiones dejaría mensajes inconsumibles. El salto de ingesta parsea al `ChangeEvent` normalizado, estampa `SessionId` (orden por registro) y `MessageId` determinístico (dedup real), y aísla los payloads corruptos en su propia DLQ. |
 | 11 | Errores **permanentes → DLQ directa; transitorios → re-encolado programado con backoff** | El trigger de Service Bus reintenta sin backoff (y las retry policies de Functions no aplican a este trigger): con el destino caído, `MaxDeliveryCount` se quema en segundos y todo termina en la DLQ — lo contrario de "esperar en la cola". El re-encolado con `ScheduledEnqueueTime` implementa la espera; el desorden que introduce lo absorbe el last-writer-wins. |
+| 12 | Portal de administración en **Blazor**, referenciando `Core` directamente | El diseñador de mapas edita los mismos records `EntityMap`/`FieldMap` que consume el motor — misma validación, cero capa de traducción. Server-side habla con Cosmos/Service Bus/App Insights vía managed identity, sin API intermedia. Se descartó model-driven Power App: acoplaría el control plane a uno de los sistemas integrados, y la mitad operativa (DLQ, métricas) igual exigiría UI custom. |
+| 13 | Mapas persistidos como **documentos JSON** (integration keys compuestas incluidas) | Legibles, diffeables, portables entre ambientes (export/import = copiar el archivo). El mismo documento es el formato local de desarrollo (`JsonFileEntityMapStore`) y el de Cosmos DB en producción. Integration key como lista de campos del destino, paridad con Dual Write. |
 
 ## Diagrama
 
@@ -32,9 +34,12 @@ flowchart TB
     INGF["IngestProcessor (Function)\nparse → SessionId → MessageId determinístico"] --> SB
     SB["Service Bus topic 'changes'\nChangeEvent normalizado · sesiones · dedup · DLQ"] --> ENGINE
     ENGINE["Motor de sincronización (Functions)\nfiltro → vínculo → eco → conflicto → mapeo → upsert"] --> CONN
-    ENGINE -.-> MAPS[("Config de mapas\nCosmos DB")]
+    ENGINE -.-> MAPS[("Config de mapas\nJSON en Cosmos DB")]
     ENGINE -.-> XREF[("Vínculos xref + estado\nCosmos DB")]
     ENGINE -.-> AI[("App Insights")]
+    PORTAL["Portal de administración (Blazor)\ndiseñador de mapas · DLQ · métricas"] -.-> MAPS
+    PORTAL -.-> SB
+    PORTAL -.-> AI
 ```
 
 ## Flujo vivo (ejemplo F&O → Dataverse)
@@ -65,8 +70,9 @@ flowchart TB
    - **Mapeo** (`MappingEngine`): campos, value maps (option sets; sin traducción y sin
      default = error permanente), transformaciones con nombre, defaults.
    - **Upsert idempotente** vía el `IConnector` destino; si el vínculo no existía, el
-     conector resuelve por clave natural antes de crear (Service Bus es at-least-once:
-     nunca hacer create ciego).
+     conector resuelve el registro existente por la **integration key** del mapa
+     (campos del destino, posiblemente compuesta) antes de crear (Service Bus es
+     at-least-once: nunca hacer create ciego).
    - **Actualizar el vínculo**: nuevo `SyncState` con el hash de *lo escrito* (esquema
      del destino), los campos escritos, y sistema/`OccurredAt` del escritor.
 5. Excepciones transitorias (destino caído, throttling) → re-encolado programado con
@@ -103,6 +109,30 @@ Notas de diseño:
   La normalización de representación de valores (números, fechas) entre lo escrito y lo
   que el sistema reporta queda para la fase 2; un falso negativo no pierde datos porque
   la defensa por identidad contiene el loop y el upsert es idempotente.
+
+## Portal de administración
+
+Proyecto Blazor (`Axxon.Integrator.AdminPortal`) que referencia `Core`: edita los
+mismos records que consume el motor, con la misma validación. Tres áreas:
+
+- **Diseñador de mapas** (estilo table maps de Dual Write): campos de cada lado
+  ofrecidos desde la metadata real de los conectores (`GetMetadataAsync`, con
+  degradación a entrada manual mientras no esté implementada), transformaciones
+  registradas en el `MappingEngine`, value maps para option sets, defaults, filtro por
+  empresas, e **integration key compuesta** elegida entre los campos destino mapeados.
+  Guardar incrementa la versión y persiste el documento JSON (vista previa del JSON en
+  la propia UI; el archivo local de desarrollo y el documento de Cosmos son el mismo
+  formato).
+- **Dead-letter**: listar/inspeccionar/reprocesar. El reproceso re-publica el mensaje
+  al camino normal (cola `ingest` o topic según de dónde venga): el last-writer-wins y
+  la supresión de eco lo protegen de duplicar o pisar datos nuevos. La UI orquesta; no
+  hay lógica de negocio nueva.
+- **Métricas**: KQL a App Insights — latencia de punta a punta por CorrelationId,
+  throughput contra el límite de data events de F&O, ecos suprimidos, conflictos,
+  profundidad de DLQs.
+
+Autenticación Entra ID con roles viewer/operator (pendiente). Acceso a Azure con la
+managed identity del portal, sin API intermedia.
 
 ## Sync inicial + cutover
 
@@ -142,15 +172,20 @@ Notas de diseño:
 | `Axxon.Integrator.Connectors.FinOps` | Parser de data events + escritura OData + export DMF. |
 | `Axxon.Integrator.Connectors.Dataverse` | Parser de service endpoints + escritura Web API + change tracking. |
 | `Axxon.Integrator.SyncEngine` | Azure Functions (isolated, .NET 8): `IngestProcessor` (normaliza y estampa sesión/dedup) y `ChangeEventProcessor` (ejecuta el pipeline). |
-| `infra/` | Bicep: Service Bus (cola `ingest` + topic `changes`), Cosmos DB, Function App, Key Vault, App Insights. |
+| `Axxon.Integrator.AdminPortal` | Blazor (server): diseñador de mapas, DLQ, métricas. Referencia `Core` — mismos modelos y validación que el motor. |
+| `infra/` | Bicep: Service Bus (cola `ingest` + topic `changes`), Cosmos DB, Function App, Key Vault, App Insights. Falta: App Service del portal. |
 
 ## Fases
 
 1. **MVP unidireccional**: Dataverse → F&O, una entidad (clientes). Valida el pipeline
    completo, incluida la ingesta (spike del formato real de los payloads) y la
-   clasificación de errores permanente/transitorio.
+   clasificación de errores permanente/transitorio. El diseñador de mapas ya existe en
+   esqueleto; los mapas del MVP pueden crearse con él (JSON local).
 2. **Bidireccional**: F&O → Dataverse + eco + conflictos sobre el estado por vínculo.
-   Endurecer la normalización de valores del hash de contenido.
+   Endurecer la normalización de valores del hash de contenido. **Consola operativa
+   mínima** en el portal (DLQ: ver + reprocesar; pausar/reanudar mapas) — no esperar a
+   la fase 4: es lo primero que se necesita con el MVP vivo.
 3. **Sync inicial** con cutover (DMF / Durable Functions).
-4. **Portal de administración**: pausar/reanudar mapas, DLQ, reprocesos, métricas.
+4. **Portal completo**: diseñador con metadata en vivo de los conectores, métricas,
+   auth Entra ID (viewer/operator), Cosmos como store de mapas, App Service en Bicep.
 5. **Tercer conector** (SQL o REST genérico): prueba de fuego de la abstracción `IConnector`.

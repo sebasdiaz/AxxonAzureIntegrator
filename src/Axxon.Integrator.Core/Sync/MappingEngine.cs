@@ -19,6 +19,9 @@ public sealed class MappingEngine
     public void RegisterTransform(string name, Func<object?, object?> transform) =>
         _transforms[name] = transform;
 
+    /// <summary>Transformaciones disponibles; alimenta el dropdown del diseñador de mapas.</summary>
+    public IReadOnlyCollection<string> TransformNames => _transforms.Keys;
+
     public EntityPayload Apply(EntityMap map, ChangeEvent evt, string? targetRecordId)
     {
         var fields = new Dictionary<string, object?>(map.Fields.Count);
@@ -77,6 +80,7 @@ public sealed class MappingEngine
             TargetRecordId = targetRecordId,
             Operation = evt.Operation,
             Fields = fields,
+            IntegrationKey = map.IntegrationKey,
             Company = evt.Company,
             IdempotencyKey = $"{map.Name}:{evt.SourceRecordId}:{evt.OccurredAt.UtcTicks}",
             CorrelationId = evt.CorrelationId,
