@@ -88,6 +88,29 @@ public sealed class DataverseMetadataTests
         Assert.Empty(stub.Requests);
     }
 
+    [Fact]
+    public async Task Lists_entities_sorted_excluding_intersects()
+    {
+        var stub = new StubHandler(HttpStatusCode.OK, """
+        {
+          "@odata.context": "https://unit.test/api/data/v9.2/$metadata#EntityDefinitions(LogicalName)",
+          "value": [
+            { "LogicalName": "contact", "MetadataId": "00000000-0000-0000-0000-00000000000a" },
+            { "LogicalName": "account", "MetadataId": "00000000-0000-0000-0000-00000000000b" },
+            { "LogicalName": "axx_pedido", "MetadataId": "00000000-0000-0000-0000-00000000000c" }
+          ]
+        }
+        """);
+        var connector = ConnectorWith(stub);
+
+        var entities = await connector.ListEntitiesAsync(CancellationToken.None);
+
+        Assert.Equal(["account", "axx_pedido", "contact"], entities);
+        var sent = Assert.Single(stub.Requests);
+        Assert.Contains("EntityDefinitions?$select=LogicalName", sent.RequestUri!.ToString());
+        Assert.Contains("IsIntersect", sent.RequestUri.ToString());
+    }
+
     private static DataverseConnector ConnectorWith(StubHandler stub) => new(
         new HttpClient(stub) { BaseAddress = new Uri("https://unit.test/") },
         new EntraAppOptions { EnvironmentUrl = "https://unit.test" });

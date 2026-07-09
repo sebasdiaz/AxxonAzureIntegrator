@@ -53,11 +53,7 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
                   "?$select=LogicalName,PrimaryIdAttribute" +
                   "&$expand=Attributes($select=LogicalName,AttributeType,AttributeOf)";
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.Add("OData-MaxVersion", "4.0");
-        request.Headers.Add("OData-Version", "4.0");
-
+        using var request = ODataGet(url);
         using var response = await Http.SendAsync(request, ct);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
@@ -89,5 +85,29 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
             PrimaryKeyField = root.GetProperty("PrimaryIdAttribute").GetString()!,
             Fields = fields,
         };
+    }
+
+    public async Task<IReadOnlyList<string>> ListEntitiesAsync(CancellationToken ct)
+    {
+        // IsIntersect eq false: fuera las tablas de relación N:N, que no se mapean.
+        // Como toda consulta de metadata, no pagina: una respuesta trae todo.
+        using var request = ODataGet("api/data/v9.2/EntityDefinitions?$select=LogicalName&$filter=IsIntersect%20eq%20false");
+        using var response = await Http.SendAsync(request, ct);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+
+        return [.. doc.RootElement.GetProperty("value").EnumerateArray()
+            .Select(e => e.GetProperty("LogicalName").GetString()!)
+            .OrderBy(n => n, StringComparer.Ordinal)];
+    }
+
+    private static HttpRequestMessage ODataGet(string url)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Add("OData-MaxVersion", "4.0");
+        request.Headers.Add("OData-Version", "4.0");
+        return request;
     }
 }
