@@ -33,7 +33,7 @@
             </select>
         </label>
         <label>Sistema origen
-            <select @bind="_sourceSystem" @bind:after="LoadMetadataAsync">
+            <select @bind="_sourceSystem" @bind:after="OnSourceSystemChangedAsync">
                 @foreach (var s in Connectors.Keys)
                 {
                     <option value="@s">@s</option>
@@ -41,10 +41,16 @@
             </select>
         </label>
         <label>Entidad origen
-            <input @bind="_sourceEntity" @bind:after="LoadMetadataAsync" placeholder="account" />
+            <input list="source-entities" @bind="_sourceEntity" @bind:after="OnEntityChangedAsync" placeholder="account" />
+            <datalist id="source-entities">
+                @foreach (var e in _sourceEntities)
+                {
+                    <option value="@e" />
+                }
+            </datalist>
         </label>
         <label>Sistema destino
-            <select @bind="_targetSystem" @bind:after="LoadMetadataAsync">
+            <select @bind="_targetSystem" @bind:after="OnTargetSystemChangedAsync">
                 @foreach (var s in Connectors.Keys)
                 {
                     <option value="@s">@s</option>
@@ -52,7 +58,13 @@
             </select>
         </label>
         <label>Entidad destino
-            <input @bind="_targetEntity" @bind:after="LoadMetadataAsync" placeholder="CustomersV3" />
+            <input list="target-entities" @bind="_targetEntity" @bind:after="OnEntityChangedAsync" placeholder="CustomersV3" />
+            <datalist id="target-entities">
+                @foreach (var e in _targetEntities)
+                {
+                    <option value="@e" />
+                }
+            </datalist>
         </label>
         <label>Empresas (separadas por coma; vacío = todas)
             <input @bind="_companies" placeholder="usmf, dat" />
@@ -178,6 +190,8 @@
     private List<FieldRow> _rows = [new()];
     private readonly HashSet<string> _integrationKey = new(StringComparer.OrdinalIgnoreCase);
 
+    private IReadOnlyList<string> _sourceEntities = [];
+    private IReadOnlyList<string> _targetEntities = [];
     private IReadOnlyList<string> _sourceFields = [];
     private IReadOnlyList<string> _targetFields = [];
     private string? _metadataWarning;
@@ -193,6 +207,7 @@
     {
         if (_isNew)
         {
+            await LoadEntitiesAsync();
             await LoadMetadataAsync();
             return;
         }
@@ -215,14 +230,65 @@
         _rows = [.. map.Fields.Select(FieldRow.From)];
         _integrationKey.UnionWith(map.IntegrationKey);
 
+        await LoadEntitiesAsync();
         await LoadMetadataAsync();
     }
 
-    private async Task LoadMetadataAsync()
+    private async Task OnSourceSystemChangedAsync()
     {
         _metadataWarning = null;
+        _sourceEntities = await EntitiesOfAsync(_sourceSystem);
+        await LoadMetadataAsync();
+    }
+
+    private async Task OnTargetSystemChangedAsync()
+    {
+        _metadataWarning = null;
+        _targetEntities = await EntitiesOfAsync(_targetSystem);
+        await LoadMetadataAsync();
+    }
+
+    private async Task LoadEntitiesAsync()
+    {
+        _sourceEntities = await EntitiesOfAsync(_sourceSystem);
+        _targetEntities = await EntitiesOfAsync(_targetSystem);
+    }
+
+    private async Task OnEntityChangedAsync()
+    {
+        _metadataWarning = null;
+        await LoadMetadataAsync();
+    }
+
+    /// <summary>No limpia el warning: eso lo hacen los handlers de usuario, para no pisar avisos de la carga de entidades.</summary>
+    private async Task LoadMetadataAsync()
+    {
         _sourceFields = await FieldsOfAsync(_sourceSystem, _sourceEntity);
         _targetFields = await FieldsOfAsync(_targetSystem, _targetEntity);
+    }
+
+    private async Task<IReadOnlyList<string>> EntitiesOfAsync(string system)
+    {
+        if (!Connectors.TryGetValue(system, out var connector))
+        {
+            return [];
+        }
+
+        try
+        {
+            return await connector.ListEntitiesAsync(CancellationToken.None);
+        }
+        catch (NotImplementedException)
+        {
+            // Sin listado de entidades el combo degrada a texto libre (el datalist
+            // vacío no bloquea la entrada manual); el aviso lo pone FieldsOfAsync.
+            return [];
+        }
+        catch (Exception ex)
+        {
+            _metadataWarning = $"No se pudieron listar las entidades de {system}: {ex.Message}";
+            return [];
+        }
     }
 
     private async Task<IReadOnlyList<string>> FieldsOfAsync(string system, string entity)

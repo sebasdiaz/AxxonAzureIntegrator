@@ -39,4 +39,7 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
 
     public Task<EntityMetadata> GetMetadataAsync(string entityName, CancellationToken ct) =>
         throw new NotImplementedException("Metadata vía $metadata de OData. Fase 4 (diseñador de mapas).");
+
+    public Task<IReadOnlyList<string>> ListEntitiesAsync(CancellationToken ct) =>
+        throw new NotImplementedException("Listado de data entities vía $metadata de OData. Fase 4 (diseñador de mapas).");
 }

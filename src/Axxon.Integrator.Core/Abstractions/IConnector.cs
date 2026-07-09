@@ -34,6 +34,12 @@ public interface IConnector
     IAsyncEnumerable<EntityPayload> ExportAsync(EntityQuery query, CancellationToken ct);
 
     Task<EntityMetadata> GetMetadataAsync(string entityName, CancellationToken ct);
+
+    /// <summary>
+    /// Entidades disponibles para mapear (logical names / nombres públicos), para los
+    /// combos del diseñador de mapas.
+    /// </summary>
+    Task<IReadOnlyList<string>> ListEntitiesAsync(CancellationToken ct);
 }
 
 /// <summary>
