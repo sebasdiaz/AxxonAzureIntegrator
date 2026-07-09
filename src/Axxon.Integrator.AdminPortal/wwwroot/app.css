@@ -113,6 +113,10 @@ table.fields input, table.fields select, table.fields textarea { width: 100%; }
 .key-options { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; }
 .key-option { flex-direction: row; align-items: center; gap: .4rem; font-size: .9rem; color: var(--text); }
 
+.companies { margin-top: .9rem; display: flex; flex-direction: column; gap: .35rem; }
+.field-label { font-size: .85rem; color: var(--muted); }
+.companies input[type="text"], .companies > input { max-width: 320px; }
+
 pre.json {
     background: #16232e;
     color: #d7e2ec;

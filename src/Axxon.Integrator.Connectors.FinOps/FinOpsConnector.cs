@@ -110,6 +110,25 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
             .OrderBy(n => n, StringComparer.Ordinal)];
     }
 
+    public async Task<IReadOnlyList<string>> ListCompaniesAsync(CancellationToken ct)
+    {
+        EnsureEnvironmentConfigured();
+
+        // LegalEntities es el maestro de empresas (dataAreaId). Son pocas filas:
+        // una página de OData alcanza, sin seguir @odata.nextLink.
+        using var request = ODataRequest.Get("data/LegalEntities?$select=LegalEntityId");
+        using var response = await Http.SendAsync(request, ct);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+
+        return [.. doc.RootElement.GetProperty("value").EnumerateArray()
+            .Select(e => e.GetProperty("LegalEntityId").GetString())
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Select(id => id!)
+            .OrderBy(id => id, StringComparer.Ordinal)];
+    }
+
     /// <summary>
     /// Sin EnvironmentUrl el HttpClient no tiene BaseAddress y HttpClient tiraría un
     /// críptico "BaseAddress must be set"; este guard lo convierte en el error real.

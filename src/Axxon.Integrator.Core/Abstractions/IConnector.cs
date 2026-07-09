@@ -40,6 +40,12 @@ public interface IConnector
     /// combos del diseñador de mapas.
     /// </summary>
     Task<IReadOnlyList<string>> ListEntitiesAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Empresas / legal entities del sistema, para el checklist del filtro por empresa
+    /// de los mapas. Vacío si el sistema no tiene noción de empresa.
+    /// </summary>
+    Task<IReadOnlyList<string>> ListCompaniesAsync(CancellationToken ct);
 }
 
 /// <summary>
