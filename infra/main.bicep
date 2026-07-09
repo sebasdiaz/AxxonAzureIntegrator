@@ -11,6 +11,20 @@ param env string = 'dev'
 
 param location string = resourceGroup().location
 
+// --- App registrations (decisión 14): escritura en Dataverse y F&O -----------
+// Los client secrets NO son parámetros: viven en Key Vault como
+// 'dataverse-client-secret' y 'finops-client-secret'; la Function App los lee por
+// referencia. Los IntegrationUserId alimentan la supresión de eco.
+@description('URL del ambiente Dataverse (ej. https://org.crm.dynamics.com). Vacío hasta aprovisionar.')
+param dataverseEnvironmentUrl string = ''
+param dataverseClientId string = ''
+param dataverseIntegrationUserId string = ''
+
+@description('URL del ambiente F&O (ej. https://axxon-dev.operations.dynamics.com). Vacío hasta aprovisionar.')
+param finopsEnvironmentUrl string = ''
+param finopsClientId string = ''
+param finopsIntegrationUserId string = ''
+
 var name = '${prefix}-${env}'
 
 // --- Service Bus: backbone de mensajería ---------------------------------
@@ -183,6 +197,19 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'Sync:IngestQueue', value: ingestQueue.name }
         { name: 'Sync:ChangesTopic', value: changesTopic.name }
         { name: 'Sync:EngineSubscription', value: engineSubscription.name }
+        // App registrations (decisión 14). Secrets por referencia de Key Vault:
+        // requiere el rol Key Vault Secrets User sobre la managed identity (pendiente
+        // junto con el resto del RBAC).
+        { name: 'Dataverse__EnvironmentUrl', value: dataverseEnvironmentUrl }
+        { name: 'Dataverse__TenantId', value: tenant().tenantId }
+        { name: 'Dataverse__ClientId', value: dataverseClientId }
+        { name: 'Dataverse__ClientSecret', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/dataverse-client-secret/)' }
+        { name: 'Dataverse__IntegrationUserId', value: dataverseIntegrationUserId }
+        { name: 'FinOps__EnvironmentUrl', value: finopsEnvironmentUrl }
+        { name: 'FinOps__TenantId', value: tenant().tenantId }
+        { name: 'FinOps__ClientId', value: finopsClientId }
+        { name: 'FinOps__ClientSecret', value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/finops-client-secret/)' }
+        { name: 'FinOps__IntegrationUserId', value: finopsIntegrationUserId }
       ]
     }
   }

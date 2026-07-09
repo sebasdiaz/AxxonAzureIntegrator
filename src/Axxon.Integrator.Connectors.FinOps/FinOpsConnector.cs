@@ -1,3 +1,4 @@
+using Axxon.Integrator.Azure;
 using Axxon.Integrator.Core.Abstractions;
 using Axxon.Integrator.Core.Model;
 
@@ -5,15 +6,23 @@ namespace Axxon.Integrator.Connectors.FinOps;
 
 /// <summary>
 /// Conector de Dynamics 365 Finance &amp; Operations. Sin desarrollo X++:
-/// - Captura viva: data events nativos de F&O publicando directo al topic de Service Bus
-///   (configurado en Sys admin > Business events; requiere change tracking en la data
-///   entity y el secret del bus en Key Vault). Este conector solo aporta el parser.
-/// - Escritura: OData sobre data entities (upsert por clave de entidad).
+/// - Captura viva: data events nativos de F&O publicando a la cola 'ingest' de Service
+///   Bus (configurado en Sys admin > Business events; requiere change tracking en la
+///   data entity y el secret del bus en Key Vault). Este conector solo aporta el parser.
+/// - Escritura: OData sobre data entities (upsert por clave de entidad), autenticada
+///   con la app registration de Entra ID (decisión 14). La app debe registrarse en
+///   F&O (Sys admin > Microsoft Entra applications) asociada a un usuario de servicio,
+///   cuyo ID (Options.IntegrationUserId) alimenta la supresión de eco.
 /// - Sync inicial: DMF (paquetes de exportación), nunca data events — el ambiente
 ///   soporta ~5.000 eventos/5 min y ~50.000/hora.
 /// </summary>
-public sealed class FinOpsConnector : IConnector
+public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : IConnector
 {
+    /// <summary>Cliente con bearer de la app registration; BaseAddress = ambiente F&O.</summary>
+    private HttpClient Http { get; } = http;
+
+    private EntraAppOptions Options { get; } = options;
+
     public string SystemName => "finops";
 
     public IAsyncEnumerable<ChangeEvent> PullChangesAsync(Watermark since, CancellationToken ct) =>

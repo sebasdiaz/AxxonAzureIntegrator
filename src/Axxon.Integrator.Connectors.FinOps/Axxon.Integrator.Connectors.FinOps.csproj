@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\Axxon.Integrator.Azure\Axxon.Integrator.Azure.csproj" />
     <ProjectReference Include="..\Axxon.Integrator.Core\Axxon.Integrator.Core.csproj" />
   </ItemGroup>
 
