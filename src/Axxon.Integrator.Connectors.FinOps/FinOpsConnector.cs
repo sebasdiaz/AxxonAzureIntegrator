@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Axxon.Integrator.Azure;
 using Axxon.Integrator.Core.Abstractions;
@@ -41,13 +42,7 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
     public async Task<EntityMetadata> GetMetadataAsync(string entityName, CancellationToken ct)
     {
         EnsureEnvironmentConfigured();
-
-        // Nombres públicos OData de F&O: PascalCase alfanumérico. Se valida antes de
-        // interpolar en el $filter.
-        if (entityName.Length == 0 || !entityName.All(c => char.IsAsciiLetter(c) || char.IsAsciiDigit(c) || c == '_'))
-        {
-            throw new ArgumentException($"Nombre de entidad OData de F&O inválido: '{entityName}'.", nameof(entityName));
-        }
+        ValidateODataName(entityName, nameof(entityName));
 
         // Metadata service REST (JSON), no el $metadata CSDL (XML de decenas de MB).
         // Se filtra por EntitySetName porque los mapas usan el nombre de colección
@@ -108,6 +103,81 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
             .Select(n => n!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(n => n, StringComparer.Ordinal)];
+    }
+
+    public async Task<IReadOnlyDictionary<string, string>> GetOptionSetAsync(string entityName, string fieldName, CancellationToken ct)
+    {
+        EnsureEnvironmentConfigured();
+        ValidateODataName(entityName, nameof(entityName));
+        ValidateODataName(fieldName, nameof(fieldName));
+
+        var empty = new Dictionary<string, string>();
+
+        // 1. Tipo del campo desde PublicEntities. Entidad o campo inexistente no es
+        //    error acá: simplemente no hay valores que ofrecer.
+        using var entityRequest = ODataRequest.Get(
+            $"metadata/PublicEntities?$filter=EntitySetName%20eq%20'{entityName}'");
+        using var entityResponse = await Http.SendAsync(entityRequest, ct);
+        entityResponse.EnsureSuccessStatusCode();
+
+        string? typeName = null;
+        using (var doc = await JsonDocument.ParseAsync(await entityResponse.Content.ReadAsStreamAsync(ct), cancellationToken: ct))
+        {
+            var matches = doc.RootElement.GetProperty("value");
+            if (matches.GetArrayLength() == 0)
+            {
+                return empty;
+            }
+
+            foreach (var property in matches[0].GetProperty("Properties").EnumerateArray())
+            {
+                if (string.Equals(property.GetProperty("Name").GetString(), fieldName, StringComparison.OrdinalIgnoreCase))
+                {
+                    typeName = property.GetProperty("TypeName").GetString();
+                    break;
+                }
+            }
+        }
+
+        // Los primitivos son "Edm.*"; los enums llevan el namespace de DataEntities.
+        if (typeName is null || typeName.StartsWith("Edm.", StringComparison.Ordinal))
+        {
+            return empty;
+        }
+        var enumName = typeName[(typeName.LastIndexOf('.') + 1)..];
+        ValidateODataName(enumName, nameof(fieldName));
+
+        // 2. Miembros del enum. OData escribe enums por nombre de miembro, así que el
+        //    diccionario usa el Name tanto de clave como de etiqueta.
+        using var enumRequest = ODataRequest.Get($"metadata/PublicEnumerations('{enumName}')");
+        using var enumResponse = await Http.SendAsync(enumRequest, ct);
+        if (enumResponse.StatusCode == HttpStatusCode.NotFound)
+        {
+            return empty;
+        }
+        enumResponse.EnsureSuccessStatusCode();
+
+        using var enumDoc = await JsonDocument.ParseAsync(await enumResponse.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        var values = new Dictionary<string, string>();
+        foreach (var member in enumDoc.RootElement.GetProperty("Members").EnumerateArray())
+        {
+            var name = member.GetProperty("Name").GetString();
+            if (!string.IsNullOrEmpty(name))
+            {
+                values[name] = name;
+            }
+        }
+        return values;
+    }
+
+    private static void ValidateODataName(string value, string paramName)
+    {
+        // Nombres públicos OData de F&O: PascalCase alfanumérico. Se valida antes de
+        // interpolar en URLs y $filter.
+        if (value.Length == 0 || !value.All(c => char.IsAsciiLetter(c) || char.IsAsciiDigit(c) || c == '_'))
+        {
+            throw new ArgumentException($"Nombre OData de F&O inválido: '{value}'.", paramName);
+        }
     }
 
     public async Task<IReadOnlyList<string>> ListCompaniesAsync(CancellationToken ct)

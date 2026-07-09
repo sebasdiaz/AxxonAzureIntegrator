@@ -40,13 +40,7 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
     public async Task<EntityMetadata> GetMetadataAsync(string entityName, CancellationToken ct)
     {
         EnsureEnvironmentConfigured();
-
-        // Logical names de Dataverse: minúsculas ASCII, dígitos y guión bajo. Se valida
-        // antes de interpolar en la URL.
-        if (entityName.Length == 0 || !entityName.All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c == '_'))
-        {
-            throw new ArgumentException($"Logical name de Dataverse inválido: '{entityName}'.", nameof(entityName));
-        }
+        ValidateLogicalName(entityName, nameof(entityName));
 
         // Una sola llamada: definición + atributos expandidos. Las consultas de
         // metadata no paginan — la primera respuesta trae todo.
@@ -103,6 +97,70 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
         return [.. doc.RootElement.GetProperty("value").EnumerateArray()
             .Select(e => e.GetProperty("LogicalName").GetString()!)
             .OrderBy(n => n, StringComparer.Ordinal)];
+    }
+
+    public async Task<IReadOnlyDictionary<string, string>> GetOptionSetAsync(string entityName, string fieldName, CancellationToken ct)
+    {
+        EnsureEnvironmentConfigured();
+        ValidateLogicalName(entityName, nameof(entityName));
+        ValidateLogicalName(fieldName, nameof(fieldName));
+
+        // Cast del atributo a PicklistAttributeMetadata: expone Options tanto del
+        // option set local como del global. Si el campo no es picklist (o no existe),
+        // el cast devuelve 404 → no hay valores que ofrecer, no es un error.
+        var url = $"api/data/v9.2/EntityDefinitions(LogicalName='{entityName}')" +
+                  $"/Attributes(LogicalName='{fieldName}')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata" +
+                  "?$select=LogicalName&$expand=OptionSet($select=Options),GlobalOptionSet($select=Options)";
+
+        using var request = ODataRequest.Get(url);
+        using var response = await Http.SendAsync(request, ct);
+        if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.BadRequest)
+        {
+            return new Dictionary<string, string>();
+        }
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        var root = doc.RootElement;
+
+        var values = new Dictionary<string, string>();
+        foreach (var setName in new[] { "OptionSet", "GlobalOptionSet" })
+        {
+            if (!root.TryGetProperty(setName, out var set) || set.ValueKind != JsonValueKind.Object ||
+                !set.TryGetProperty("Options", out var options) || options.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var option in options.EnumerateArray())
+            {
+                var value = option.GetProperty("Value").GetInt32().ToString(System.Globalization.CultureInfo.InvariantCulture);
+                var label = value;
+                if (option.TryGetProperty("Label", out var lbl) && lbl.ValueKind == JsonValueKind.Object &&
+                    lbl.TryGetProperty("UserLocalizedLabel", out var localized) && localized.ValueKind == JsonValueKind.Object &&
+                    localized.TryGetProperty("Label", out var text) && text.ValueKind == JsonValueKind.String)
+                {
+                    label = text.GetString()!;
+                }
+                values[value] = label;
+            }
+
+            if (values.Count > 0)
+            {
+                break; // local y global son excluyentes: usa el que tenga opciones
+            }
+        }
+        return values;
+    }
+
+    private static void ValidateLogicalName(string value, string paramName)
+    {
+        // Logical names de Dataverse: minúsculas ASCII, dígitos y guión bajo. Se
+        // valida antes de interpolar en la URL.
+        if (value.Length == 0 || !value.All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c == '_'))
+        {
+            throw new ArgumentException($"Logical name de Dataverse inválido: '{value}'.", paramName);
+        }
     }
 
     public Task<IReadOnlyList<string>> ListCompaniesAsync(CancellationToken ct) =>

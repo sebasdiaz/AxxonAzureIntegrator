@@ -111,6 +111,43 @@ public sealed class DataverseMetadataTests
         Assert.Contains("IsIntersect", sent.RequestUri.ToString());
     }
 
+    [Fact]
+    public async Task Parses_picklist_options_with_labels()
+    {
+        var stub = new StubHandler(HttpStatusCode.OK, """
+        {
+          "LogicalName": "industrycode",
+          "MetadataId": "00000000-0000-0000-0000-000000000004",
+          "OptionSet": {
+            "Options": [
+              { "Value": 1, "Label": { "UserLocalizedLabel": { "Label": "Accounting" } } },
+              { "Value": 2, "Label": { "UserLocalizedLabel": { "Label": "Agriculture" } } }
+            ]
+          },
+          "GlobalOptionSet": null
+        }
+        """);
+        var connector = ConnectorWith(stub);
+
+        var options = await connector.GetOptionSetAsync("account", "industrycode", CancellationToken.None);
+
+        Assert.Equal("Accounting", options["1"]);
+        Assert.Equal("Agriculture", options["2"]);
+        var sent = Assert.Single(stub.Requests);
+        Assert.Contains("PicklistAttributeMetadata", sent.RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task Non_picklist_field_returns_empty_options()
+    {
+        // El cast a PicklistAttributeMetadata sobre un campo string devuelve 404
+        var connector = ConnectorWith(new StubHandler(HttpStatusCode.NotFound, """{"error":{"message":"Not Found"}}"""));
+
+        var options = await connector.GetOptionSetAsync("account", "name", CancellationToken.None);
+
+        Assert.Empty(options);
+    }
+
     private static DataverseConnector ConnectorWith(StubHandler stub) => new(
         new HttpClient(stub) { BaseAddress = new Uri("https://unit.test/") },
         new EntraAppOptions { EnvironmentUrl = "https://unit.test" });

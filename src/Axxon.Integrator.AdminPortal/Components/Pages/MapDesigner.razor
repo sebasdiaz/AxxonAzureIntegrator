@@ -125,7 +125,7 @@
                         </select>
                     </td>
                     <td>
-                        <button class="btn" @onclick="() => r.ValueMapExpanded = !r.ValueMapExpanded">
+                        <button class="btn" @onclick="() => ToggleValueMapAsync(r)">
                             Diccionario (@r.ValueMap.Count)
                         </button>
                     </td>
@@ -149,12 +149,24 @@
                                 {
                                     var p = pair;
                                     <div class="pair">
-                                        <input placeholder="valor origen (ej. 1)" @bind="p.Key" />
+                                        <input list="@($"vm-src-{r.Id}")" placeholder="valor origen (ej. 1)" @bind="p.Key" />
                                         <span class="arrow">→</span>
-                                        <input placeholder="valor destino (ej. Retail)" @bind="p.Value" />
+                                        <input list="@($"vm-tgt-{r.Id}")" placeholder="valor destino (ej. Retail)" @bind="p.Value" />
                                         <button class="btn danger" @onclick="() => r.ValueMap.Remove(p)">✕</button>
                                     </div>
                                 }
+                                <datalist id="@($"vm-src-{r.Id}")">
+                                    @foreach (var o in r.SourceOptions)
+                                    {
+                                        <option value="@o.Key">@o.Value</option>
+                                    }
+                                </datalist>
+                                <datalist id="@($"vm-tgt-{r.Id}")">
+                                    @foreach (var o in r.TargetOptions)
+                                    {
+                                        <option value="@o.Key">@o.Value</option>
+                                    }
+                                </datalist>
                                 <button class="btn" @onclick="() => r.ValueMap.Add(new())">+ Agregar traducción</button>
                                 <p class="hint">
                                     Un valor entrante sin traducción usa el Default del campo; sin Default,
@@ -246,6 +258,7 @@
     private IReadOnlyList<string> _targetEntities = [];
     private IReadOnlyList<string> _sourceFields = [];
     private IReadOnlyList<string> _targetFields = [];
+    private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _optionCache = new(StringComparer.OrdinalIgnoreCase);
     private string? _metadataWarning;
     private string? _error;
     private string? _jsonPreview;
@@ -423,6 +436,53 @@
         PruneIntegrationKey();
     }
 
+    private async Task ToggleValueMapAsync(FieldRow row)
+    {
+        row.ValueMapExpanded = !row.ValueMapExpanded;
+        if (!row.ValueMapExpanded)
+        {
+            return;
+        }
+
+        // Pre-pobla los datalists con los valores reales del option set / enum de
+        // cada lado; sin metadata (campo no enumerado, credenciales faltantes) los
+        // datalists quedan vacíos y la entrada sigue siendo texto libre.
+        row.SourceOptions = await OptionsOfAsync(_sourceSystem, _sourceEntity, row.Source);
+        row.TargetOptions = await OptionsOfAsync(_targetSystem, _targetEntity, row.Target);
+    }
+
+    private async Task<IReadOnlyDictionary<string, string>> OptionsOfAsync(string system, string entity, string field)
+    {
+        var empty = new Dictionary<string, string>();
+        if (string.IsNullOrWhiteSpace(entity) || string.IsNullOrWhiteSpace(field) ||
+            !Connectors.TryGetValue(system, out var connector))
+        {
+            return empty;
+        }
+
+        var cacheKey = $"{system}|{entity.Trim()}|{field.Trim()}";
+        if (_optionCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            var options = await connector.GetOptionSetAsync(entity.Trim(), field.Trim(), CancellationToken.None);
+            _optionCache[cacheKey] = options;
+            return options;
+        }
+        catch (NotImplementedException)
+        {
+            return empty;
+        }
+        catch (Exception ex)
+        {
+            _metadataWarning = $"No se pudieron leer los valores de {system}/{entity}.{field}: {ex.Message}";
+            return empty;
+        }
+    }
+
     private void ToggleKey(string field, bool selected)
     {
         if (selected)
@@ -521,11 +581,16 @@
     /// <summary>Copia editable de un FieldMap. Los defaults se editan como texto; tipado fino: fase 4.</summary>
     private sealed class FieldRow
     {
+        /// <summary>Para los ids únicos de los datalists del editor de diccionario.</summary>
+        public readonly string Id = Guid.NewGuid().ToString("N")[..8];
+
         public string Source = "";
         public string Target = "";
         public string Transform = "";
         public List<ValuePair> ValueMap = [];
         public bool ValueMapExpanded;
+        public IReadOnlyDictionary<string, string> SourceOptions = new Dictionary<string, string>();
+        public IReadOnlyDictionary<string, string> TargetOptions = new Dictionary<string, string>();
         public string Default = "";
 
         public bool IsComplete => Source.Trim().Length > 0 && Target.Trim().Length > 0;
