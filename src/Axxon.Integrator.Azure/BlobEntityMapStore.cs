@@ -65,6 +65,11 @@ public sealed class BlobEntityMapStore(BlobContainerClient container) : IEntityM
             overwrite: true,
             ct);
 
+    public Task DeleteAsync(string name, CancellationToken ct) =>
+        // El versioning del blob service conserva las versiones previas incluso tras
+        // el delete: un mapa eliminado por error se restaura desde el portal de Azure.
+        container.GetBlobClient(BlobNameFor(name)).DeleteIfExistsAsync(cancellationToken: ct);
+
     /// <summary>Misma validación de nombre que el file store, para que un mapa sea portable entre ambos.</summary>
     private static string BlobNameFor(string mapName)
     {

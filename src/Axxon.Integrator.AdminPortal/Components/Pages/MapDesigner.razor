@@ -99,7 +99,7 @@
                 <th>Campo origen</th>
                 <th>Campo destino</th>
                 <th>Transformación</th>
-                <th>Value map (origen=destino, uno por línea)</th>
+                <th>Value map</th>
                 <th>Default</th>
                 <th></th>
             </tr>
@@ -125,7 +125,9 @@
                         </select>
                     </td>
                     <td>
-                        <textarea rows="1" @bind="r.ValueMapText" placeholder="1=Retail&#10;2=Wholesale"></textarea>
+                        <button class="btn" @onclick="() => r.ValueMapExpanded = !r.ValueMapExpanded">
+                            Diccionario (@r.ValueMap.Count)
+                        </button>
                     </td>
                     <td>
                         <input @bind="r.Default" />
@@ -134,6 +136,35 @@
                         <button class="btn danger" @onclick="() => RemoveRow(r)">✕</button>
                     </td>
                 </tr>
+                @if (r.ValueMapExpanded)
+                {
+                    <tr class="value-map-row">
+                        <td colspan="6">
+                            <div class="value-map-editor">
+                                <span class="field-label">
+                                    Diccionario de traducción de valores (option sets / enums) para
+                                    «@(r.Source.Length > 0 ? r.Source : "campo origen")» → «@(r.Target.Length > 0 ? r.Target : "campo destino")»
+                                </span>
+                                @foreach (var pair in r.ValueMap)
+                                {
+                                    var p = pair;
+                                    <div class="pair">
+                                        <input placeholder="valor origen (ej. 1)" @bind="p.Key" />
+                                        <span class="arrow">→</span>
+                                        <input placeholder="valor destino (ej. Retail)" @bind="p.Value" />
+                                        <button class="btn danger" @onclick="() => r.ValueMap.Remove(p)">✕</button>
+                                    </div>
+                                }
+                                <button class="btn" @onclick="() => r.ValueMap.Add(new())">+ Agregar traducción</button>
+                                <p class="hint">
+                                    Un valor entrante sin traducción usa el Default del campo; sin Default,
+                                    el evento se marca como error permanente (dead-letter) en vez de escribir
+                                    un valor inválido en el destino.
+                                </p>
+                            </div>
+                        </td>
+                    </tr>
+                }
             }
         </tbody>
     </table>
@@ -466,10 +497,26 @@
         return null;
     }
 
-    private void TogglePreview() =>
-        _jsonPreview = _jsonPreview is null
-            ? JsonSerializer.Serialize(BuildMap(_isNew ? 1 : _version + 1), JsonFileEntityMapStore.SerializerOptions)
-            : null;
+    private void TogglePreview()
+    {
+        if (_jsonPreview is not null)
+        {
+            _jsonPreview = null;
+            return;
+        }
+
+        try
+        {
+            // BuildMap valida (p. ej. claves duplicadas en un diccionario): el error
+            // se muestra en el banner en vez de tumbar el circuito.
+            _jsonPreview = JsonSerializer.Serialize(BuildMap(_isNew ? 1 : _version + 1), JsonFileEntityMapStore.SerializerOptions);
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
 
     /// <summary>Copia editable de un FieldMap. Los defaults se editan como texto; tipado fino: fase 4.</summary>
     private sealed class FieldRow
@@ -477,7 +524,8 @@
         public string Source = "";
         public string Target = "";
         public string Transform = "";
-        public string ValueMapText = "";
+        public List<ValuePair> ValueMap = [];
+        public bool ValueMapExpanded;
         public string Default = "";
 
         public bool IsComplete => Source.Trim().Length > 0 && Target.Trim().Length > 0;
@@ -487,7 +535,9 @@
             Source = f.Source,
             Target = f.Target,
             Transform = f.Transform ?? "",
-            ValueMapText = f.ValueMap is null ? "" : string.Join('\n', f.ValueMap.Select(kv => $"{kv.Key}={kv.Value}")),
+            ValueMap = f.ValueMap is null
+                ? []
+                : [.. f.ValueMap.Select(kv => new ValuePair { Key = kv.Key, Value = kv.Value })],
             Default = f.DefaultValue?.ToString() ?? "",
         };
 
@@ -496,18 +546,34 @@
             Source = Source.Trim(),
             Target = Target.Trim(),
             Transform = string.IsNullOrWhiteSpace(Transform) ? null : Transform,
-            ValueMap = ParseValueMap(ValueMapText),
+            ValueMap = BuildValueMap(),
             DefaultValue = string.IsNullOrWhiteSpace(Default) ? null : Default.Trim(),
         };
 
-        private static IReadOnlyDictionary<string, string>? ParseValueMap(string text)
+        private IReadOnlyDictionary<string, string>? BuildValueMap()
         {
-            var pairs = text
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(line => line.Split('=', 2))
-                .Where(parts => parts.Length == 2)
-                .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim());
-            return pairs.Count == 0 ? null : pairs;
+            var pairs = ValueMap.Where(p => p.Key.Trim().Length > 0).ToList();
+            if (pairs.Count == 0)
+            {
+                return null;
+            }
+
+            var dictionary = new Dictionary<string, string>();
+            foreach (var pair in pairs)
+            {
+                if (!dictionary.TryAdd(pair.Key.Trim(), pair.Value.Trim()))
+                {
+                    throw new InvalidOperationException(
+                        $"El diccionario de '{Source}' tiene la clave duplicada '{pair.Key.Trim()}'.");
+                }
+            }
+            return dictionary;
+        }
+
+        public sealed class ValuePair
+        {
+            public string Key = "";
+            public string Value = "";
         }
     }
 }
