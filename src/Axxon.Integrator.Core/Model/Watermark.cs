@@ -23,6 +23,12 @@ public sealed record EntityQuery
 public sealed record EntityMetadata
 {
     public required string EntityName { get; init; }
-    public required string PrimaryKeyField { get; init; }
+
+    /// <summary>
+    /// Campos de la clave primaria. Lista porque en F&O es compuesta
+    /// (ej. dataAreaId + CustomerAccount); en Dataverse es un único GUID.
+    /// </summary>
+    public required IReadOnlyList<string> KeyFields { get; init; }
+
     public required IReadOnlyDictionary<string, string> Fields { get; init; } // nombre -> tipo
 }

@@ -41,7 +41,7 @@ public sealed class DataverseMetadataTests
         var metadata = await connector.GetMetadataAsync("account", CancellationToken.None);
 
         Assert.Equal("account", metadata.EntityName);
-        Assert.Equal("accountid", metadata.PrimaryKeyField);
+        Assert.Equal(["accountid"], metadata.KeyFields);
         Assert.Equal(["accountid", "accountnumber", "industrycode", "name", "primarycontactid"],
             metadata.Fields.Keys.OrderBy(k => k, StringComparer.Ordinal));
         Assert.Equal("Picklist", metadata.Fields["industrycode"]);

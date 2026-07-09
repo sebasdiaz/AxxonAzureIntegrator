@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Axxon.Integrator.Azure;
 using Axxon.Integrator.Core.Abstractions;
 using Axxon.Integrator.Core.Model;
@@ -37,9 +38,88 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
     public IAsyncEnumerable<EntityPayload> ExportAsync(EntityQuery query, CancellationToken ct) =>
         throw new NotImplementedException("Export masivo vía DMF package API. Fase 3 (sync inicial).");
 
-    public Task<EntityMetadata> GetMetadataAsync(string entityName, CancellationToken ct) =>
-        throw new NotImplementedException("Metadata vía $metadata de OData. Fase 4 (diseñador de mapas).");
+    public async Task<EntityMetadata> GetMetadataAsync(string entityName, CancellationToken ct)
+    {
+        EnsureEnvironmentConfigured();
 
-    public Task<IReadOnlyList<string>> ListEntitiesAsync(CancellationToken ct) =>
-        throw new NotImplementedException("Listado de data entities vía $metadata de OData. Fase 4 (diseñador de mapas).");
+        // Nombres públicos OData de F&O: PascalCase alfanumérico. Se valida antes de
+        // interpolar en el $filter.
+        if (entityName.Length == 0 || !entityName.All(c => char.IsAsciiLetter(c) || char.IsAsciiDigit(c) || c == '_'))
+        {
+            throw new ArgumentException($"Nombre de entidad OData de F&O inválido: '{entityName}'.", nameof(entityName));
+        }
+
+        // Metadata service REST (JSON), no el $metadata CSDL (XML de decenas de MB).
+        // Se filtra por EntitySetName porque los mapas usan el nombre de colección
+        // OData — el mismo con el que se escribe en /data/{coleccion}.
+        using var request = ODataRequest.Get(
+            $"metadata/PublicEntities?$filter=EntitySetName%20eq%20'{entityName}'");
+        using var response = await Http.SendAsync(request, ct);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        var matches = doc.RootElement.GetProperty("value");
+        if (matches.GetArrayLength() == 0)
+        {
+            throw new InvalidOperationException(
+                $"No hay ninguna public entity con EntitySetName '{entityName}' en {Options.EnvironmentUrl}.");
+        }
+
+        var entity = matches[0];
+        var keyFields = new List<string>();
+        var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in entity.GetProperty("Properties").EnumerateArray())
+        {
+            var name = property.GetProperty("Name").GetString()!;
+            // "Edm.String" -> "String"; enums "Microsoft.Dynamics.DataEntities.NoYes" -> "NoYes"
+            var typeName = property.GetProperty("TypeName").GetString() ?? "Unknown";
+            fields[name] = typeName[(typeName.LastIndexOf('.') + 1)..];
+
+            if (property.TryGetProperty("IsKey", out var isKey) && isKey.ValueKind == JsonValueKind.True)
+            {
+                keyFields.Add(name);
+            }
+        }
+
+        return new EntityMetadata
+        {
+            EntityName = entity.GetProperty("EntitySetName").GetString()!,
+            KeyFields = keyFields, // compuesta: típicamente dataAreaId + clave natural
+            Fields = fields,
+        };
+    }
+
+    public async Task<IReadOnlyList<string>> ListEntitiesAsync(CancellationToken ct)
+    {
+        EnsureEnvironmentConfigured();
+
+        // Solo las entidades expuestas por OData (DataServiceEnabled): son las únicas
+        // sobre las que el conector puede escribir.
+        using var request = ODataRequest.Get(
+            "metadata/DataEntities?$filter=DataServiceEnabled%20eq%20true&$select=PublicCollectionName");
+        using var response = await Http.SendAsync(request, ct);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+
+        return [.. doc.RootElement.GetProperty("value").EnumerateArray()
+            .Select(e => e.GetProperty("PublicCollectionName").GetString())
+            .Where(n => !string.IsNullOrEmpty(n))
+            .Select(n => n!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Sin EnvironmentUrl el HttpClient no tiene BaseAddress y HttpClient tiraría un
+    /// críptico "BaseAddress must be set"; este guard lo convierte en el error real.
+    /// </summary>
+    private void EnsureEnvironmentConfigured()
+    {
+        if (Http.BaseAddress is null)
+        {
+            throw new InvalidOperationException(
+                "Falta FinOps:EnvironmentUrl en la configuración (appsettings/user-secrets en el portal, local.settings.json en el SyncEngine).");
+        }
+    }
 }
