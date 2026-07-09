@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Text.Json;
 using Axxon.Integrator.Azure;
 using Axxon.Integrator.Core.Abstractions;
@@ -55,7 +54,7 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
                   "?$select=LogicalName,PrimaryIdAttribute" +
                   "&$expand=Attributes($select=LogicalName,AttributeType,AttributeOf)";
 
-        using var request = ODataGet(url);
+        using var request = ODataRequest.Get(url);
         using var response = await Http.SendAsync(request, ct);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
@@ -84,7 +83,7 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
         return new EntityMetadata
         {
             EntityName = root.GetProperty("LogicalName").GetString()!,
-            PrimaryKeyField = root.GetProperty("PrimaryIdAttribute").GetString()!,
+            KeyFields = [root.GetProperty("PrimaryIdAttribute").GetString()!],
             Fields = fields,
         };
     }
@@ -95,7 +94,7 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
 
         // IsIntersect eq false: fuera las tablas de relación N:N, que no se mapean.
         // Como toda consulta de metadata, no pagina: una respuesta trae todo.
-        using var request = ODataGet("api/data/v9.2/EntityDefinitions?$select=LogicalName&$filter=IsIntersect%20eq%20false");
+        using var request = ODataRequest.Get("api/data/v9.2/EntityDefinitions?$select=LogicalName&$filter=IsIntersect%20eq%20false");
         using var response = await Http.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
 
@@ -119,12 +118,4 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
         }
     }
 
-    private static HttpRequestMessage ODataGet(string url)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.Add("OData-MaxVersion", "4.0");
-        request.Headers.Add("OData-Version", "4.0");
-        return request;
-    }
 }

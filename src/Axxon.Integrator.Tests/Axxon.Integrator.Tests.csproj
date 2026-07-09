@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Axxon.Integrator.Connectors.Dataverse\Axxon.Integrator.Connectors.Dataverse.csproj" />
+    <ProjectReference Include="..\Axxon.Integrator.Connectors.FinOps\Axxon.Integrator.Connectors.FinOps.csproj" />
     <ProjectReference Include="..\Axxon.Integrator.Core\Axxon.Integrator.Core.csproj" />
   </ItemGroup>
 
