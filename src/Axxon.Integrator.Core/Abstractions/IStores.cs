@@ -89,6 +89,13 @@ public interface IEntityMapStore
 
     /// <summary>Crea o reemplaza el documento del mapa (el diseñador incrementa <see cref="EntityMap.Version"/>).</summary>
     Task SaveAsync(EntityMap map, CancellationToken ct);
+
+    /// <summary>
+    /// Elimina el documento del mapa. Idempotente: eliminar un mapa inexistente no es
+    /// error. Los vínculos del xref que el mapa haya creado se conservan (histórico
+    /// inocuo; si el mapa se recrea, se reutilizan).
+    /// </summary>
+    Task DeleteAsync(string name, CancellationToken ct);
 }
 
 /// <summary>Persistencia de watermarks para polling y sync inicial.</summary>

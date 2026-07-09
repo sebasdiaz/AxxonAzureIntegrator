@@ -117,6 +117,16 @@ table.fields input, table.fields select, table.fields textarea { width: 100%; }
 .field-label { font-size: .85rem; color: var(--muted); }
 .companies input[type="text"], .companies > input { max-width: 320px; }
 
+.row-actions { white-space: nowrap; }
+.row-actions .btn { padding: .25rem .6rem; font-size: .85rem; }
+
+.value-map-row td { background: #fafbfc; }
+.value-map-editor { display: flex; flex-direction: column; gap: .4rem; padding: .5rem .25rem; }
+.value-map-editor .pair { display: flex; align-items: center; gap: .4rem; }
+.value-map-editor .pair input { max-width: 220px; }
+.value-map-editor .pair .arrow { color: var(--muted); }
+.value-map-editor > .btn { align-self: flex-start; }
+
 pre.json {
     background: #16232e;
     color: #d7e2ec;

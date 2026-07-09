@@ -64,6 +64,16 @@ public sealed class JsonFileEntityMapStore(string directory) : IEntityMapStore
         await JsonSerializer.SerializeAsync(stream, map, SerializerOptions, ct);
     }
 
+    public Task DeleteAsync(string name, CancellationToken ct)
+    {
+        var file = PathFor(name);
+        if (File.Exists(file))
+        {
+            File.Delete(file);
+        }
+        return Task.CompletedTask;
+    }
+
     private string PathFor(string mapName)
     {
         if (mapName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)

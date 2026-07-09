@@ -46,6 +46,13 @@ public interface IConnector
     /// de los mapas. Vacío si el sistema no tiene noción de empresa.
     /// </summary>
     Task<IReadOnlyList<string>> ListCompaniesAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Valores del option set / enum de un campo (valor → etiqueta), para pre-poblar
+    /// los diccionarios de traducción del diseñador. Vacío si el campo no es
+    /// enumerado o no existe.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, string>> GetOptionSetAsync(string entityName, string fieldName, CancellationToken ct);
 }
 
 /// <summary>
