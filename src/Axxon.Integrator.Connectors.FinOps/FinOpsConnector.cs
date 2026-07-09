@@ -30,11 +30,110 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
     public IAsyncEnumerable<ChangeEvent> PullChangesAsync(Watermark since, CancellationToken ct) =>
         throw new NotImplementedException("Catch-up por OData con change tracking. Fase 3.");
 
-    public Task<UpsertResult> UpsertAsync(EntityPayload payload, CancellationToken ct) =>
-        throw new NotImplementedException("Upsert vía OData: PATCH con clave de entidad y If-Match:*. Fase 1 (MVP).");
+    public async Task<UpsertResult> UpsertAsync(EntityPayload payload, CancellationToken ct)
+    {
+        EnsureEnvironmentConfigured();
+        ValidateODataName(payload.EntityName, nameof(payload));
 
-    public Task DeleteAsync(EntityPayload payload, CancellationToken ct) =>
-        throw new NotImplementedException("DELETE vía OData. Fase 2.");
+        // En F&O la integration key ES la clave OData de la entidad: el "record id"
+        // que persiste el xref es este segmento canónico de clave.
+        var keySegment = payload.TargetRecordId ?? BuildKeySegment(payload);
+
+        // PATCH primero (update-only con If-Match:*): el caso dominante del sync
+        // continuo es update. cross-company: la clave incluye dataAreaId y el registro
+        // puede no estar en la empresa default del usuario de integración.
+        using var patch = ODataRequest.Patch(
+            $"data/{payload.EntityName}({keySegment})?cross-company=true",
+            ODataRequest.JsonContent(BodyFor(payload, includeKeys: false)),
+            ifMatchAny: true);
+        using var patchResponse = await Http.SendAsync(patch, ct);
+        if (patchResponse.StatusCode != HttpStatusCode.NotFound)
+        {
+            await ODataRequest.EnsureSuccessAsync(patchResponse, ct);
+            return new UpsertResult { TargetRecordId = keySegment, Created = false };
+        }
+
+        using var post = ODataRequest.Post($"data/{payload.EntityName}", ODataRequest.JsonContent(BodyFor(payload, includeKeys: true)));
+        using var postResponse = await Http.SendAsync(post, ct);
+        await ODataRequest.EnsureSuccessAsync(postResponse, ct);
+        return new UpsertResult { TargetRecordId = keySegment, Created = true };
+    }
+
+    public async Task DeleteAsync(EntityPayload payload, CancellationToken ct)
+    {
+        EnsureEnvironmentConfigured();
+        ValidateODataName(payload.EntityName, nameof(payload));
+
+        var keySegment = payload.TargetRecordId ?? BuildKeySegment(payload);
+        using var request = ODataRequest.Delete($"data/{payload.EntityName}({keySegment})?cross-company=true");
+        using var response = await Http.SendAsync(request, ct);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return; // ya no existe: el delete es idempotente
+        }
+        await ODataRequest.EnsureSuccessAsync(response, ct);
+    }
+
+    /// <summary>Segmento de clave OData: dataAreaId='usmf',CustomerAccount='C001'.</summary>
+    private static string BuildKeySegment(EntityPayload payload)
+    {
+        if (payload.IntegrationKey.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"Sin vínculo en el xref y sin integration key en el mapa para {payload.EntityName} ({payload.CorrelationId}): imposible dirigir el upsert OData.");
+        }
+
+        var parts = new List<string>(payload.IntegrationKey.Count);
+        foreach (var key in payload.IntegrationKey)
+        {
+            ValidateODataName(key, nameof(payload));
+            parts.Add($"{key}={ODataLiteral.Format(KeyValueFor(payload, key))}");
+        }
+        return string.Join(",", parts);
+    }
+
+    private static object KeyValueFor(EntityPayload payload, string key)
+    {
+        if (payload.Fields.TryGetValue(key, out var value) && value is not null)
+        {
+            return value;
+        }
+
+        // dataAreaId suele venir del filtro por empresa del evento, no de un campo mapeado
+        if (string.Equals(key, "dataAreaId", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(payload.Company))
+        {
+            return payload.Company;
+        }
+
+        throw new InvalidOperationException(
+            $"La integration key '{key}' no tiene valor en el payload de {payload.EntityName} ({payload.CorrelationId}).");
+    }
+
+    /// <summary>
+    /// Cuerpo del write: en PATCH las claves van en la URL y F&O rechaza modificarlas;
+    /// en POST van todas (más dataAreaId desde la empresa del evento si no está mapeada,
+    /// para que el registro se cree en la legal entity correcta).
+    /// </summary>
+    private static IReadOnlyDictionary<string, object?> BodyFor(EntityPayload payload, bool includeKeys)
+    {
+        if (includeKeys)
+        {
+            if (string.IsNullOrEmpty(payload.Company) ||
+                payload.Fields.Keys.Contains("dataAreaId", StringComparer.OrdinalIgnoreCase))
+            {
+                return payload.Fields;
+            }
+            var withCompany = new Dictionary<string, object?>(payload.Fields, StringComparer.OrdinalIgnoreCase)
+            {
+                ["dataAreaId"] = payload.Company,
+            };
+            return withCompany;
+        }
+
+        return payload.Fields
+            .Where(f => !payload.IntegrationKey.Contains(f.Key, StringComparer.OrdinalIgnoreCase))
+            .ToDictionary(f => f.Key, f => f.Value, StringComparer.OrdinalIgnoreCase);
+    }
 
     public IAsyncEnumerable<EntityPayload> ExportAsync(EntityQuery query, CancellationToken ct) =>
         throw new NotImplementedException("Export masivo vía DMF package API. Fase 3 (sync inicial).");
