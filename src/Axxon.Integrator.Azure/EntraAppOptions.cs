@@ -34,9 +34,16 @@ public sealed record EntraAppOptions
     /// hosts arrancan igual y el error claro recién aparece si se intenta llamar al
     /// sistema.
     /// </summary>
-    public bool IsConfigured =>
-        !string.IsNullOrWhiteSpace(EnvironmentUrl) &&
-        !string.IsNullOrWhiteSpace(TenantId) &&
-        !string.IsNullOrWhiteSpace(ClientId) &&
-        !string.IsNullOrWhiteSpace(ClientSecret);
+    public bool IsConfigured => MissingSettings.Count == 0;
+
+    /// <summary>Claves requeridas que faltan; alimenta los mensajes de error para que digan exactamente qué configurar.</summary>
+    public IReadOnlyList<string> MissingSettings => [.. new[]
+        {
+            (nameof(EnvironmentUrl), EnvironmentUrl),
+            (nameof(TenantId), TenantId),
+            (nameof(ClientId), ClientId),
+            (nameof(ClientSecret), ClientSecret),
+        }
+        .Where(s => string.IsNullOrWhiteSpace(s.Item2))
+        .Select(s => s.Item1)];
 }

@@ -40,8 +40,9 @@ public sealed class EntraBearerHandler(EntraAppOptions options) : DelegatingHand
                 if (!options.IsConfigured)
                 {
                     throw new InvalidOperationException(
-                        $"Faltan credenciales de la app registration para '{options.EnvironmentUrl}': " +
-                        "configurá EnvironmentUrl, TenantId, ClientId y ClientSecret en la sección del sistema.");
+                        "Configuración incompleta de la app registration: falta(n) " +
+                        $"{string.Join(", ", options.MissingSettings)} en la sección del sistema " +
+                        "(appsettings/user-secrets en el portal, local.settings.json en el SyncEngine).");
                 }
 
                 _credential ??= new ClientSecretCredential(options.TenantId, options.ClientId, options.ClientSecret);
@@ -67,6 +68,12 @@ public static class EntraHttp
             InnerHandler = new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(10) },
         })
     {
-        BaseAddress = options.IsConfigured ? new Uri(options.EnvironmentUrl.TrimEnd('/') + "/") : null,
+        // BaseAddress depende SOLO de EnvironmentUrl: con configuración parcial (p.ej.
+        // falta el secret) el request debe llegar hasta el handler, que es quien tira
+        // el error claro con las claves faltantes — no un críptico "BaseAddress must
+        // be set" de HttpClient.
+        BaseAddress = string.IsNullOrWhiteSpace(options.EnvironmentUrl)
+            ? null
+            : new Uri(options.EnvironmentUrl.TrimEnd('/') + "/"),
     };
 }
