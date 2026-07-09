@@ -26,9 +26,14 @@ builder.Services.AddSingleton<MappingEngine>();
 // Mapas como documentos JSON: archivos locales en desarrollo; en producción el mismo
 // documento vive en Cosmos DB. TODO(fase 4): CosmosEntityMapStore + autenticación
 // Entra ID con roles viewer/operator.
-builder.Services.AddSingleton<IEntityMapStore>(_ => new JsonFileEntityMapStore(
-    builder.Configuration["Maps:Directory"]
-        ?? Path.Combine(builder.Environment.ContentRootPath, "maps")));
+// Vacío cuenta como no-configurado: el template de appsettings trae "" y con ?? solo
+// el null caería al default, dejando el store apuntando a la nada.
+var mapsDirectory = builder.Configuration["Maps:Directory"];
+if (string.IsNullOrWhiteSpace(mapsDirectory))
+{
+    mapsDirectory = Path.Combine(builder.Environment.ContentRootPath, "maps");
+}
+builder.Services.AddSingleton<IEntityMapStore>(_ => new JsonFileEntityMapStore(mapsDirectory));
 
 var app = builder.Build();
 

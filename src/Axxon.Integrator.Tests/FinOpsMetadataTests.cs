@@ -100,6 +100,28 @@ public sealed class FinOpsMetadataTests
     }
 
     [Fact]
+    public async Task Lists_legal_entities_sorted()
+    {
+        var stub = new StubHandler(HttpStatusCode.OK, """
+        {
+          "@odata.context": "https://unit.test/data/$metadata#LegalEntities(LegalEntityId)",
+          "value": [
+            { "LegalEntityId": "USMF" },
+            { "LegalEntityId": "DAT" },
+            { "LegalEntityId": "USRT" }
+          ]
+        }
+        """);
+        var connector = ConnectorWith(stub);
+
+        var companies = await connector.ListCompaniesAsync(CancellationToken.None);
+
+        Assert.Equal(["DAT", "USMF", "USRT"], companies);
+        var sent = Assert.Single(stub.Requests);
+        Assert.StartsWith("https://unit.test/data/LegalEntities", sent.RequestUri!.ToString());
+    }
+
+    [Fact]
     public async Task Missing_environment_url_reports_the_setting_name()
     {
         var options = new EntraAppOptions();

@@ -105,6 +105,12 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
             .OrderBy(n => n, StringComparer.Ordinal)];
     }
 
+    public Task<IReadOnlyList<string>> ListCompaniesAsync(CancellationToken ct) =>
+        // La noción de empresa (dataAreaId) es de F&O; un Dataverse vanilla no tiene
+        // tabla de empresas (cdm_company existe solo con Dual Write instalado). El
+        // checklist del diseñador se alimenta del lado F&O.
+        Task.FromResult<IReadOnlyList<string>>([]);
+
     /// <summary>
     /// Sin EnvironmentUrl el HttpClient no tiene BaseAddress y HttpClient tiraría un
     /// críptico "BaseAddress must be set"; este guard lo convierte en el error real.

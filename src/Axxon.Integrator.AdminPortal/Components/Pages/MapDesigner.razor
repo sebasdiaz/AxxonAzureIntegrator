@@ -66,9 +66,28 @@
                 }
             </datalist>
         </label>
-        <label>Empresas (separadas por coma; vacío = todas)
-            <input @bind="_companies" placeholder="usmf, dat" />
-        </label>
+    </div>
+    <div class="companies">
+        <span class="field-label">Empresas / legal entities (ninguna marcada = todas)</span>
+        @if (_companyOptions.Count > 0)
+        {
+            <div class="key-options">
+                @foreach (var c in _companyOptions)
+                {
+                    var company = c;
+                    <label class="key-option">
+                        <input type="checkbox" checked="@_companies.Contains(company)"
+                               @onchange="e => ToggleCompany(company, (bool)e.Value!)" />
+                        @company
+                    </label>
+                }
+            </div>
+        }
+        else
+        {
+            @* Sin conector que liste empresas: degrada a texto libre separado por coma *@
+            <input @bind="_companiesFreeText" @bind:after="SyncCompaniesFromText" placeholder="usmf, dat" />
+        }
     </div>
 </section>
 
@@ -184,7 +203,9 @@
     private string _sourceEntity = "";
     private string _targetSystem = "finops";
     private string _targetEntity = "";
-    private string _companies = "";
+    private readonly HashSet<string> _companies = new(StringComparer.OrdinalIgnoreCase);
+    private string _companiesFreeText = "";
+    private IReadOnlyList<string> _companyOptions = [];
     private MapStatus _status = MapStatus.Active;
     private int _version = 1;
     private List<FieldRow> _rows = [new()];
@@ -208,6 +229,7 @@
         if (_isNew)
         {
             await LoadEntitiesAsync();
+            await LoadCompaniesAsync();
             await LoadMetadataAsync();
             return;
         }
@@ -224,14 +246,59 @@
         _sourceEntity = map.SourceEntity;
         _targetSystem = map.TargetSystem;
         _targetEntity = map.TargetEntity;
-        _companies = string.Join(", ", map.Companies);
+        _companies.UnionWith(map.Companies);
+        _companiesFreeText = string.Join(", ", map.Companies);
         _status = map.Status;
         _version = map.Version;
         _rows = [.. map.Fields.Select(FieldRow.From)];
         _integrationKey.UnionWith(map.IntegrationKey);
 
         await LoadEntitiesAsync();
+        await LoadCompaniesAsync();
         await LoadMetadataAsync();
+    }
+
+    private async Task LoadCompaniesAsync()
+    {
+        var options = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var connector in Connectors.Values)
+        {
+            try
+            {
+                options.UnionWith(await connector.ListCompaniesAsync(CancellationToken.None));
+            }
+            catch (NotImplementedException)
+            {
+                // sin listado: si ningún conector aporta, degrada a texto libre
+            }
+            catch (Exception ex)
+            {
+                _metadataWarning = $"No se pudieron listar las empresas: {ex.Message}";
+            }
+        }
+
+        // Un mapa existente no pierde selecciones que no estén en el listado
+        // (empresa borrada, ambiente distinto): se muestran como opciones marcadas.
+        options.UnionWith(_companies);
+        _companyOptions = [.. options];
+    }
+
+    private void ToggleCompany(string company, bool selected)
+    {
+        if (selected)
+        {
+            _companies.Add(company);
+        }
+        else
+        {
+            _companies.Remove(company);
+        }
+    }
+
+    private void SyncCompaniesFromText()
+    {
+        _companies.Clear();
+        _companies.UnionWith(_companiesFreeText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     }
 
     private async Task OnSourceSystemChangedAsync()
@@ -349,7 +416,7 @@
         TargetSystem = _targetSystem.Trim(),
         TargetEntity = _targetEntity.Trim(),
         Status = _status,
-        Companies = [.. _companies.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)],
+        Companies = [.. _companies.OrderBy(c => c, StringComparer.Ordinal)],
         Fields = [.. _rows.Where(r => r.IsComplete).Select(r => r.ToFieldMap())],
         IntegrationKey = [.. _integrationKey],
         Version = version,
