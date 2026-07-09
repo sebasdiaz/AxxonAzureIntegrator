@@ -72,10 +72,10 @@ public sealed record SyncState
 }
 
 /// <summary>
-/// Acceso a la configuración de mapas: documentos JSON versionados (Cosmos DB en
-/// producción, archivos locales en desarrollo). Un bidireccional se modela como dos
-/// mapas direccionales que comparten <see cref="EntityMap.PairKey"/>.
-/// El motor solo lee; el portal de administración escribe.
+/// Acceso a la configuración de mapas: documentos JSON planos (Blob Storage en
+/// producción, archivos locales en desarrollo — el mismo documento). Un bidireccional
+/// se modela como dos mapas direccionales que comparten <see cref="EntityMap.PairKey"/>.
+/// El motor solo lee (detrás de un caché en memoria); el portal escribe.
 /// </summary>
 public interface IEntityMapStore
 {
