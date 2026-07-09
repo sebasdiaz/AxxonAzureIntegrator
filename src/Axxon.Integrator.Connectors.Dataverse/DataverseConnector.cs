@@ -40,6 +40,8 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
 
     public async Task<EntityMetadata> GetMetadataAsync(string entityName, CancellationToken ct)
     {
+        EnsureEnvironmentConfigured();
+
         // Logical names de Dataverse: minúsculas ASCII, dígitos y guión bajo. Se valida
         // antes de interpolar en la URL.
         if (entityName.Length == 0 || !entityName.All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c == '_'))
@@ -89,6 +91,8 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
 
     public async Task<IReadOnlyList<string>> ListEntitiesAsync(CancellationToken ct)
     {
+        EnsureEnvironmentConfigured();
+
         // IsIntersect eq false: fuera las tablas de relación N:N, que no se mapean.
         // Como toda consulta de metadata, no pagina: una respuesta trae todo.
         using var request = ODataGet("api/data/v9.2/EntityDefinitions?$select=LogicalName&$filter=IsIntersect%20eq%20false");
@@ -100,6 +104,19 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
         return [.. doc.RootElement.GetProperty("value").EnumerateArray()
             .Select(e => e.GetProperty("LogicalName").GetString()!)
             .OrderBy(n => n, StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Sin EnvironmentUrl el HttpClient no tiene BaseAddress y HttpClient tiraría un
+    /// críptico "BaseAddress must be set"; este guard lo convierte en el error real.
+    /// </summary>
+    private void EnsureEnvironmentConfigured()
+    {
+        if (Http.BaseAddress is null)
+        {
+            throw new InvalidOperationException(
+                "Falta Dataverse:EnvironmentUrl en la configuración (appsettings/user-secrets en el portal, local.settings.json en el SyncEngine).");
+        }
     }
 
     private static HttpRequestMessage ODataGet(string url)
