@@ -29,7 +29,10 @@
       "source": "IsSalesTaxIncludedInPrice",
       "target": "msdyn_issalestaxincludedinprice",
       "transform": null,
-      "valueMap": null,
+      "valueMap": {
+        "No": "false",
+        "Yes": "true"
+      },
       "defaultValue": null
     },
     {
@@ -50,5 +53,5 @@
   "integrationKey": [
     "msdyn_groupid"
   ],
-  "version": 1
+  "version": 2
 }
