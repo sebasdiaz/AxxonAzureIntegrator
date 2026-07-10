@@ -5,6 +5,7 @@ using Axxon.Integrator.Core.Abstractions;
 using Axxon.Integrator.Core.Stores;
 using Axxon.Integrator.Core.Sync;
 using global::Azure.Identity;
+using global::Azure.Messaging.ServiceBus;
 using global::Azure.Storage.Blobs;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -56,12 +57,38 @@ var builder = new HostBuilder()
                 string.IsNullOrWhiteSpace(mapsDirectory) ? "maps" : mapsDirectory));
         }
 
-        // TODO(MVP): stores de Cosmos (xref + watermarks) y sender del topic para el
-        // IngestProcessor.
-        // services.AddSingleton<IXrefStore, CosmosXrefStore>();
-        // services.AddSingleton<IWatermarkStore, CosmosWatermarkStore>();
-        // services.AddSingleton(sp => serviceBusClient.CreateSender(changesTopicName));
-        // services.AddSingleton<SyncPipeline>();
+        // Publicación del IngestProcessor al topic 'changes'. Misma convención de
+        // conexión que el trigger: 'ServiceBusConnection' como connection string, o
+        // 'ServiceBusConnection__fullyQualifiedNamespace' para identidad. La validación
+        // corre al construirse el primer function, no al arrancar el host.
+        services.AddSingleton(_ =>
+        {
+            var connectionString = context.Configuration["ServiceBusConnection"];
+            if (!string.IsNullOrWhiteSpace(connectionString))
+            {
+                return new ServiceBusClient(connectionString);
+            }
+
+            var qualifiedNamespace = context.Configuration["ServiceBusConnection:fullyQualifiedNamespace"];
+            if (!string.IsNullOrWhiteSpace(qualifiedNamespace))
+            {
+                return new ServiceBusClient(qualifiedNamespace, new DefaultAzureCredential());
+            }
+
+            throw new InvalidOperationException(
+                "Configurar 'ServiceBusConnection' (connection string) o 'ServiceBusConnection__fullyQualifiedNamespace' (identidad).");
+        });
+        services.AddSingleton(sp => sp.GetRequiredService<ServiceBusClient>()
+            .CreateSender(context.Configuration["Sync:ChangesTopic"] ?? "changes"));
+
+        // Xref: archivos JSON locales (desarrollo). TODO(fase 1): CosmosXrefStore
+        // (documentos espejo por lado, ETag) y CosmosWatermarkStore cuando entre el
+        // catch-up por polling.
+        var xrefDirectory = context.Configuration["Xref:Directory"];
+        services.AddSingleton<IXrefStore>(_ => new JsonFileXrefStore(
+            string.IsNullOrWhiteSpace(xrefDirectory) ? "xref" : xrefDirectory));
+
+        services.AddSingleton<SyncPipeline>();
     });
 
 builder.Build().Run();

@@ -63,5 +63,14 @@ public interface IConnector
 public interface IChangeEventParser
 {
     string SystemName { get; }
+
+    /// <summary>
+    /// Sniffing barato del payload para identificar el sistema origen: F&O y Dataverse
+    /// publican en la misma cola de ingesta y sus endpoints no estampan application
+    /// properties, así que el origen se reconoce por la forma del JSON. No debe lanzar:
+    /// un payload ajeno o corrupto devuelve false.
+    /// </summary>
+    bool CanParse(BinaryData messageBody);
+
     ChangeEvent Parse(BinaryData messageBody);
 }
