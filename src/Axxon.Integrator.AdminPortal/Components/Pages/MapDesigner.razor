@@ -24,7 +24,7 @@
     <h2>Definición</h2>
     <div class="form-grid">
         <label>Nombre
-            <input @bind="_name" disabled="@(!_isNew)" placeholder="customers-dataverse-to-finops" />
+            <input @bind="_name" @bind:after="OnNameEdited" disabled="@(!_isNew)" placeholder="account (CustomersV3)" />
         </label>
         <label>Estado
             <select @bind="_status">
@@ -242,6 +242,7 @@
     private bool _isNew => Name is null;
 
     private string _name = "";
+    private bool _nameTouched;
     private string _sourceSystem = "dataverse";
     private string _sourceEntity = "";
     private string _targetSystem = "finops";
@@ -367,8 +368,28 @@
 
     private async Task OnEntityChangedAsync()
     {
+        ApplyDefaultName();
         _metadataWarning = null;
         await LoadMetadataAsync();
+    }
+
+    /// <summary>El usuario escribió (o vació) el nombre: con texto propio se respeta; vacío reactiva el default.</summary>
+    private void OnNameEdited() => _nameTouched = !string.IsNullOrWhiteSpace(_name);
+
+    /// <summary>Nombre por default de un mapa nuevo: "entidadOrigen (entidadDestino)".</summary>
+    private void ApplyDefaultName()
+    {
+        if (!_isNew || _nameTouched)
+        {
+            return;
+        }
+
+        var source = _sourceEntity.Trim();
+        var target = _targetEntity.Trim();
+        if (source.Length > 0 && target.Length > 0)
+        {
+            _name = $"{source} ({target})";
+        }
     }
 
     /// <summary>No limpia el warning: eso lo hacen los handlers de usuario, para no pisar avisos de la carga de entidades.</summary>
