@@ -5,6 +5,7 @@
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
 
+    "$comment_serviceBus": "Local: la forma simple es reemplazar la clave de abajo por 'ServiceBusConnection' con la connection string completa (key desde el portal de Azure). La variante __fullyQualifiedNamespace usa identidad (requiere az login y rol Service Bus Data Receiver/Sender). Una sola cola 'ingest' para todos los sistemas y mapas: el ruteo a mapas lo hace el pipeline por (sistema, entidad).",
     "ServiceBusConnection__fullyQualifiedNamespace": "axxonint-dev-sb.servicebus.windows.net",
     "Maps__Directory": "",
     "Maps__BlobContainerUri": "",
