@@ -9,6 +9,8 @@
     "ServiceBusConnection__fullyQualifiedNamespace": "axxonint-dev-sb.servicebus.windows.net",
     "Maps__Directory": "",
     "Maps__BlobContainerUri": "",
+    "$comment_xref": "Vínculos xref en archivos JSON locales para desarrollo (vacío = carpeta 'xref' junto al host). Producción: Cosmos, pendiente fase 1.",
+    "Xref__Directory": "",
     "Sync:IngestQueue": "ingest",
     "Sync:ChangesTopic": "changes",
     "Sync:EngineSubscription": "sync-engine",

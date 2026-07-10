@@ -26,8 +26,7 @@ public sealed class IngestProcessor(
     ServiceBusSender changesTopicSender,
     ILogger<IngestProcessor> logger)
 {
-    private readonly IReadOnlyDictionary<string, IChangeEventParser> _parsersBySystem =
-        parsers.ToDictionary(p => p.SystemName, StringComparer.OrdinalIgnoreCase);
+    private readonly IReadOnlyList<IChangeEventParser> _parsers = [.. parsers];
 
     [Function(nameof(IngestProcessor))]
     public async Task RunAsync(
@@ -52,11 +51,16 @@ public sealed class IngestProcessor(
             evt.SourceSystem, evt.EntityName, evt.SourceRecordId, evt.Operation, evt.CorrelationId);
     }
 
+    /// <summary>
+    /// F&O y Dataverse no ponen application properties custom en el mensaje: el origen
+    /// se identifica dejando que cada parser huela el payload (<see cref="IChangeEventParser.CanParse"/>).
+    /// Gana el primero en orden de registro; si nadie lo reconoce es error permanente
+    /// (payload ajeno o corrupto) y muere en la DLQ de 'ingest'.
+    /// </summary>
     private IChangeEventParser SelectParser(ServiceBusReceivedMessage message) =>
-        // TODO(MVP): F&O y Dataverse no ponen application properties custom en el
-        // mensaje; identificar el origen por la forma del payload (BusinessEventId /
-        // RemoteExecutionContext) o por colas de ingesta dedicadas por sistema.
-        throw new NotImplementedException("Selección de parser por origen. Fase 1 (MVP).");
+        _parsers.FirstOrDefault(p => p.CanParse(message.Body))
+        ?? throw new FormatException(
+            $"Ningún parser registrado ({string.Join(", ", _parsers.Select(p => p.SystemName))}) reconoce el payload del mensaje {message.MessageId}.");
 
     /// <summary>
     /// Mismo evento → mismo MessageId, para que el duplicate detection del topic
