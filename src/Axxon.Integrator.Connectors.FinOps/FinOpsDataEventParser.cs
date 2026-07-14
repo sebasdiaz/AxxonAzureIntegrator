@@ -49,11 +49,14 @@ public sealed partial class FinOpsDataEventParser : IChangeEventParser
         var messageName = GetString(root, "MessageName")
             ?? throw new FormatException("Data event sin MessageName.");
 
+        // Los data events reales llegan con los MessageName "OnExternal*" del pipeline
+        // de business events; la forma "Create/Update/Delete" pelada del contrato Xrm
+        // se acepta también por si algún origen la usa.
         var operation = messageName switch
         {
-            "Create" => ChangeOperation.Create,
-            "Update" => ChangeOperation.Update,
-            "Delete" => ChangeOperation.Delete,
+            "Create" or "OnExternalCreated" => ChangeOperation.Create,
+            "Update" or "OnExternalUpdated" => ChangeOperation.Update,
+            "Delete" or "OnExternalDeleted" => ChangeOperation.Delete,
             _ => throw new FormatException($"MessageName no soportado: '{messageName}'."),
         };
 
@@ -80,7 +83,11 @@ public sealed partial class FinOpsDataEventParser : IChangeEventParser
             SourceRecordId = recordId,
             Operation = operation,
             OccurredAt = occurredAt,
-            Company = data.FirstOrDefault(kv => string.Equals(kv.Key, "dataAreaId", StringComparison.OrdinalIgnoreCase)).Value as string,
+            // La empresa viene como "dataAreaId" en el contrato documentado y como
+            // "mserp_dataareaid" en los data events reales (entidad virtual mserp_*).
+            Company = data.FirstOrDefault(kv =>
+                string.Equals(kv.Key, "dataAreaId", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(kv.Key, "mserp_dataareaid", StringComparison.OrdinalIgnoreCase)).Value as string,
             Data = data,
             OriginatingUserId = FirstUsefulId(
                 GetString(root, "InitiatingUserAzureActiveDirectoryObjectId"),

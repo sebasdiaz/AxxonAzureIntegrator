@@ -34,8 +34,20 @@ public sealed class IngestProcessor(
         ServiceBusReceivedMessage message,
         CancellationToken ct)
     {
-        var parser = SelectParser(message);
-        var evt = parser.Parse(message.Body);
+        ChangeEvent evt;
+        try
+        {
+            var parser = SelectParser(message);
+            evt = parser.Parse(message.Body);
+        }
+        catch (Exception ex)
+        {
+            // El error puntual y un prefijo del payload en una sola línea: lo primero
+            // que se necesita ver en consola cuando un mensaje termina en la DLQ.
+            logger.LogError("Ingesta fallida para el mensaje {MessageId}: {Error} | Payload: {Payload}",
+                message.MessageId, ex.Message, Truncate(message.Body.ToString(), 600));
+            throw;
+        }
 
         var outgoing = new ServiceBusMessage(BinaryData.FromObjectAsJson(evt))
         {
@@ -61,6 +73,9 @@ public sealed class IngestProcessor(
         _parsers.FirstOrDefault(p => p.CanParse(message.Body))
         ?? throw new FormatException(
             $"Ningún parser registrado ({string.Join(", ", _parsers.Select(p => p.SystemName))}) reconoce el payload del mensaje {message.MessageId}.");
+
+    private static string Truncate(string text, int max) =>
+        text.Length <= max ? text : text[..max] + "…";
 
     /// <summary>
     /// Mismo evento → mismo MessageId, para que el duplicate detection del topic

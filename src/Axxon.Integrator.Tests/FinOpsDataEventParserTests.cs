@@ -98,6 +98,51 @@ public sealed class FinOpsDataEventParserTests
         Assert.NotEqual("00000000-0000-0000-0000-000000000000", evt.CorrelationId);
     }
 
+    /// <summary>
+    /// Forma real capturada de la cola (data event de F&O 10.0.48): MessageName
+    /// "OnExternal*", entidad virtual mserp_*, empresa en "mserp_dataareaid",
+    /// PrimaryEntityId en GUID vacío (el id útil viene en Target.Id) y fecha solo
+    /// en OperationCreatedOn.
+    /// </summary>
+    [Fact]
+    public void Parse_real_data_event_with_OnExternal_message_and_mserp_fields()
+    {
+        const string payload = """
+        {
+          "CorrelationId": "844bbf91-d451-4cad-a83d-1fea5f32ebaf",
+          "InitiatingUserAzureActiveDirectoryObjectId": "e3a96d5d-8187-498c-88e7-4448cc8e57fa",
+          "MessageName": "OnExternalCreated",
+          "OperationCreatedOn": "/Date(1784051293000+0000)/",
+          "PrimaryEntityId": "00000000-0000-0000-0000-000000000000",
+          "PrimaryEntityName": "mserp_custcustomergroupentity",
+          "InputParameters": [
+            {
+              "key": "Target",
+              "value": {
+                "__type": "Entity:http://schemas.microsoft.com/xrm/2011/Contracts",
+                "Attributes": [
+                  { "key": "mserp_customergroupid", "value": "Default" },
+                  { "key": "mserp_issalestaxincludedinprice", "value": { "__type": "OptionSetValue:http://schemas.microsoft.com/xrm/2011/Contracts", "Value": 200000000 } },
+                  { "key": "mserp_dataareaid", "value": "alas" }
+                ],
+                "Id": "00004951-0000-0000-5e1a-005001000000",
+                "LogicalName": "mserp_custcustomergroupentity"
+              }
+            }
+          ]
+        }
+        """;
+
+        var evt = _parser.Parse(BinaryData.FromString(payload));
+
+        Assert.Equal(ChangeOperation.Create, evt.Operation);
+        Assert.Equal("mserp_custcustomergroupentity", evt.EntityName);
+        Assert.Equal("00004951-0000-0000-5e1a-005001000000", evt.SourceRecordId); // Target.Id: el PrimaryEntityId vacío no cuenta
+        Assert.Equal("alas", evt.Company); // mserp_dataareaid
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1784051293000), evt.OccurredAt);
+        Assert.Equal(200000000L, evt.Data["mserp_issalestaxincludedinprice"]);
+    }
+
     [Theory]
     [InlineData("Assign")]
     [InlineData("")]
