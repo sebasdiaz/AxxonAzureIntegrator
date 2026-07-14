@@ -224,6 +224,10 @@
 <section class="toolbar">
     <button class="btn primary" @onclick="SaveAsync">Guardar (v@(_isNew ? 1 : _version + 1))</button>
     <button class="btn" @onclick="TogglePreview">@(_jsonPreview is null ? "Ver JSON" : "Ocultar JSON")</button>
+    @if (!_isNew)
+    {
+        <a class="btn" href="/maps/@Name/history">Histórico</a>
+    }
     <a class="btn" href="/maps">Cancelar</a>
 </section>
 

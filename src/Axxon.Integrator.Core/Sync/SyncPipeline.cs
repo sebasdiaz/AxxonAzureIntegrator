@@ -18,9 +18,14 @@ public sealed class SyncPipeline(
     EchoGuard echoGuard,
     MappingEngine mappingEngine,
     IReadOnlyDictionary<string, IConnector> connectors,
+    ISyncHistoryStore historyStore,
     ILogger<SyncPipeline> logger)
 {
-    public async Task ProcessAsync(ChangeEvent evt, CancellationToken ct)
+    /// <param name="deliveryCount">
+    /// Número de entrega de Service Bus del mensaje (1 = primer intento); queda en el
+    /// histórico para distinguir el primer fallo de los reintentos.
+    /// </param>
+    public async Task ProcessAsync(ChangeEvent evt, int deliveryCount, CancellationToken ct)
     {
         var maps = await mapStore.GetMapsForSourceAsync(evt.SourceSystem, evt.EntityName, ct);
         if (maps.Count == 0)
@@ -32,11 +37,21 @@ public sealed class SyncPipeline(
 
         foreach (var map in maps)
         {
-            await ProcessMapAsync(map, evt, ct);
+            try
+            {
+                await ProcessMapAsync(map, evt, deliveryCount, ct);
+            }
+            catch (Exception ex)
+            {
+                // El histórico registra el intento fallido y la excepción sigue su
+                // camino (reintento del trigger → DLQ al agotar MaxDeliveryCount).
+                await RecordAsync(map, evt, deliveryCount, SyncOutcome.Failed, targetRecordId: null, ex.Message, ct);
+                throw;
+            }
         }
     }
 
-    private async Task ProcessMapAsync(EntityMap map, ChangeEvent evt, CancellationToken ct)
+    private async Task ProcessMapAsync(EntityMap map, ChangeEvent evt, int deliveryCount, CancellationToken ct)
     {
         if (map.Companies.Count > 0 && (evt.Company is null || !map.Companies.Contains(evt.Company, StringComparer.OrdinalIgnoreCase)))
         {
@@ -51,6 +66,7 @@ public sealed class SyncPipeline(
         {
             logger.LogInformation("Eco suprimido para {Map} {RecordId} ({CorrelationId})",
                 map.Name, evt.SourceRecordId, evt.CorrelationId);
+            await RecordAsync(map, evt, deliveryCount, SyncOutcome.EchoSuppressed, link?.RecordIdIn(map.TargetSystem), error: null, ct);
             return;
         }
 
@@ -62,6 +78,7 @@ public sealed class SyncPipeline(
         {
             logger.LogWarning("Evento descartado por last-writer-wins para {Map} {RecordId}: {EventTime} < {LastWriter} de {WriterSystem}",
                 map.Name, evt.SourceRecordId, evt.OccurredAt, state.LastWriterOccurredAt, state.LastWriterSystem);
+            await RecordAsync(map, evt, deliveryCount, SyncOutcome.DiscardedByLastWriterWins, link.RecordIdIn(map.TargetSystem), error: null, ct);
             return;
         }
 
@@ -76,6 +93,7 @@ public sealed class SyncPipeline(
         if (evt.Operation == ChangeOperation.Delete)
         {
             await target.DeleteAsync(payload, ct);
+            await RecordAsync(map, evt, deliveryCount, SyncOutcome.Deleted, targetRecordId, error: null, ct);
             if (link is not null)
             {
                 // Tombstone: el vínculo se conserva con el estado del delete para que un
@@ -123,5 +141,42 @@ public sealed class SyncPipeline(
 
         logger.LogInformation("Sincronizado {Map}: {Source}/{RecordId} -> {Target} ({CorrelationId})",
             map.Name, evt.SourceSystem, evt.SourceRecordId, map.TargetSystem, evt.CorrelationId);
+
+        await RecordAsync(map, evt, deliveryCount,
+            result.Created ? SyncOutcome.Created : SyncOutcome.Updated, result.TargetRecordId, error: null, ct);
+    }
+
+    /// <summary>
+    /// Registro best-effort en el histórico: informar el desenlace nunca puede tumbar
+    /// (ni re-encolar) una sincronización que ya ocurrió — a lo sumo se pierde el
+    /// renglón y queda el warning en App Insights.
+    /// </summary>
+    private async Task RecordAsync(EntityMap map, ChangeEvent evt, int deliveryCount,
+        SyncOutcome outcome, string? targetRecordId, string? error, CancellationToken ct)
+    {
+        try
+        {
+            await historyStore.AppendAsync(new SyncHistoryEntry
+            {
+                MapName = map.Name,
+                ProcessedAt = DateTimeOffset.UtcNow,
+                Outcome = outcome,
+                Operation = evt.Operation,
+                SourceSystem = evt.SourceSystem,
+                SourceRecordId = evt.SourceRecordId,
+                TargetSystem = map.TargetSystem,
+                TargetRecordId = targetRecordId,
+                Company = evt.Company,
+                OccurredAt = evt.OccurredAt,
+                Error = error,
+                DeliveryCount = deliveryCount,
+                CorrelationId = evt.CorrelationId,
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "No se pudo registrar el histórico de {Map} para {RecordId} ({CorrelationId})",
+                map.Name, evt.SourceRecordId, evt.CorrelationId);
+        }
     }
 }

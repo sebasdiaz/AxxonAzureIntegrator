@@ -107,6 +107,29 @@ table.fields input, table.fields select, table.fields textarea { width: 100%; }
 .status.active { color: #067647; }
 .status.paused { color: var(--muted); }
 
+/* Histórico de sincronización */
+.status.outcome-ok { color: #067647; }
+.status.outcome-deleted { color: #b54708; }
+.status.outcome-failed { color: var(--danger); }
+.status.outcome-skipped { color: var(--muted); }
+.status.link { background: none; border: none; padding: 0; font: inherit; cursor: pointer; }
+
+.history-summary { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; align-items: center; }
+.history-summary .counter {
+    background: #fff; border: 1px solid var(--border); border-radius: 999px;
+    padding: .3rem .8rem; font-size: .85rem; cursor: pointer;
+}
+.history-summary .counter.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.history-summary .counter.outcome-ok strong { color: #067647; }
+.history-summary .counter.outcome-deleted strong { color: #b54708; }
+.history-summary .counter.outcome-failed strong { color: var(--danger); }
+.history-summary .counter.outcome-skipped strong { color: var(--muted); }
+
+.history-failed td { background: var(--error-bg); }
+.history-error-detail td { background: #fafbfc; }
+.history-error-detail pre { margin: 0; padding: .5rem .25rem; white-space: pre-wrap; word-break: break-word; font-size: .8rem; }
+.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: .82rem; }
+
 .hint { color: var(--muted); font-size: .85rem; }
 .placeholder { color: var(--muted); font-style: italic; }
 
