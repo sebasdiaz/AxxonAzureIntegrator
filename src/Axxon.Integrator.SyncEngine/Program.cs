@@ -4,6 +4,7 @@ using Axxon.Integrator.Connectors.FinOps;
 using Axxon.Integrator.Core.Abstractions;
 using Axxon.Integrator.Core.Stores;
 using Axxon.Integrator.Core.Sync;
+using global::Azure.Data.Tables;
 using global::Azure.Identity;
 using global::Azure.Messaging.ServiceBus;
 using global::Azure.Storage.Blobs;
@@ -80,6 +81,24 @@ var builder = new HostBuilder()
         });
         services.AddSingleton(sp => sp.GetRequiredService<ServiceBusClient>()
             .CreateSender(context.Configuration["Sync:ChangesTopic"] ?? "changes"));
+
+        // Histórico de sincronización: Table Storage cuando hay History:TableUri
+        // (producción, managed identity), archivos JSONL locales si no (desarrollo).
+        // El pipeline lo escribe best-effort; la pestaña Histórico del portal lo lee.
+        var historyTableUri = context.Configuration["History:TableUri"];
+        if (!string.IsNullOrWhiteSpace(historyTableUri))
+        {
+            services.AddSingleton<ISyncHistoryStore>(_ => new TableSyncHistoryStore(new TableClient(
+                new Uri(historyTableUri),
+                context.Configuration["History:TableName"] ?? "synchistory",
+                new DefaultAzureCredential())));
+        }
+        else
+        {
+            var historyDirectory = context.Configuration["History:Directory"];
+            services.AddSingleton<ISyncHistoryStore>(_ => new JsonFileSyncHistoryStore(
+                string.IsNullOrWhiteSpace(historyDirectory) ? "history" : historyDirectory));
+        }
 
         // Xref: archivos JSON locales (desarrollo). TODO(fase 1): CosmosXrefStore
         // (documentos espejo por lado, ETag) y CosmosWatermarkStore cuando entre el

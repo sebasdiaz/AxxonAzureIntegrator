@@ -175,6 +175,20 @@ resource entityMapsContainer 'Microsoft.Storage/storageAccounts/blobServices/con
   name: 'entity-maps'
 }
 
+// Histórico de sincronización por mapa (PartitionKey = mapa, RowKey = ticks
+// invertidos): lo escribe el pipeline best-effort y lo lee la pestaña Histórico del
+// portal. Acceso por managed identity con Storage Table Data Contributor (pendiente
+// junto con el resto del RBAC). Retención: Tables no tiene TTL — limpieza pendiente.
+resource tableService 'Microsoft.Storage/storageAccounts/tableServices@2023-01-01' = {
+  parent: storage
+  name: 'default'
+}
+
+resource syncHistoryTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2023-01-01' = {
+  parent: tableService
+  name: 'synchistory'
+}
+
 resource plan 'Microsoft.Web/serverfarms@2023-01-01' = {
   name: '${name}-plan'
   location: location
@@ -205,6 +219,8 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'Sync:ChangesTopic', value: changesTopic.name }
         { name: 'Sync:EngineSubscription', value: engineSubscription.name }
         { name: 'Maps__BlobContainerUri', value: 'https://${storage.name}.blob.${environment().suffixes.storage}/${entityMapsContainer.name}' }
+        { name: 'History__TableUri', value: 'https://${storage.name}.table.${environment().suffixes.storage}' }
+        { name: 'History__TableName', value: syncHistoryTable.name }
         // App registrations (decisión 14). Secrets por referencia de Key Vault:
         // requiere el rol Key Vault Secrets User sobre la managed identity (pendiente
         // junto con el resto del RBAC).

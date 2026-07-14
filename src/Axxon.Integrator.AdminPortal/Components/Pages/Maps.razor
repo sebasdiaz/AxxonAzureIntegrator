@@ -43,6 +43,7 @@ else
                     <td><span class="status @m.Status.ToString().ToLowerInvariant()">@(m.Status == MapStatus.Active ? "Activo" : "Pausado")</span></td>
                     <td>@m.Version</td>
                     <td class="row-actions">
+                        <a class="btn" href="/maps/@m.Name/history">Histórico</a>
                         @if (_pendingDelete == m.Name)
                         {
                             <button class="btn danger" @onclick="() => DeleteAsync(m.Name)">Confirmar</button>
