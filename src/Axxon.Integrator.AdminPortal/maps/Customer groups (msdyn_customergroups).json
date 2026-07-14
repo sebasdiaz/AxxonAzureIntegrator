@@ -1,7 +1,7 @@
 {
   "name": "Customer groups (msdyn_customergroups)",
   "sourceSystem": "finops",
-  "sourceEntity": "CustomerGroups",
+  "sourceEntity": "mserp_custcustomergroupentity",
   "targetSystem": "dataverse",
   "targetEntity": "msdyn_customergroup",
   "direction": "oneWay",
@@ -12,46 +12,32 @@
   ],
   "fields": [
     {
-      "source": "CustomerGroupId",
+      "source": "mserp_customergroupid",
       "target": "msdyn_groupid",
       "transform": null,
       "valueMap": null,
       "defaultValue": null
     },
     {
-      "source": "Description",
+      "source": "mserp_description",
       "target": "msdyn_description",
       "transform": null,
       "valueMap": null,
       "defaultValue": null
     },
     {
-      "source": "IsSalesTaxIncludedInPrice",
+      "source": "mserp_issalestaxincludedinprice",
       "target": "msdyn_issalestaxincludedinprice",
       "transform": null,
       "valueMap": {
-        "No": "false",
-        "Yes": "true"
+        "200000000": "false",
+        "200000001": "true"
       },
-      "defaultValue": null
-    },
-    {
-      "source": "PaymentTermId",
-      "target": "msdyn_paymenttermid",
-      "transform": null,
-      "valueMap": null,
-      "defaultValue": null
-    },
-    {
-      "source": "ClearingPeriodPaymentTermName",
-      "target": "msdyn_clearingperiodpaymenttermname",
-      "transform": null,
-      "valueMap": null,
       "defaultValue": null
     }
   ],
   "integrationKey": [
     "msdyn_groupid"
   ],
-  "version": 2
+  "version": 3
 }

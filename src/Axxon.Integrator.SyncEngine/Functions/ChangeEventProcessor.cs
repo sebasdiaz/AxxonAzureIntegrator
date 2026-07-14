@@ -35,6 +35,18 @@ public sealed class ChangeEventProcessor(SyncPipeline pipeline, ILogger<ChangeEv
         logger.LogInformation("Evento recibido: {System}/{Entity}/{RecordId} {Operation} SessionId={SessionId} ({CorrelationId})",
             evt.SourceSystem, evt.EntityName, evt.SourceRecordId, evt.Operation, message.SessionId, evt.CorrelationId);
 
-        await pipeline.ProcessAsync(evt, ct);
+        try
+        {
+            await pipeline.ProcessAsync(evt, ct);
+        }
+        catch (Exception ex)
+        {
+            // Resumen en una línea antes del stack trace del host: qué evento falló,
+            // en qué entrega va (DeliveryCount de MaxDeliveryCount) y el error del
+            // destino — la respuesta a "¿por qué no se insertó?" sin bucear en la DLQ.
+            logger.LogError("Sync fallida para {System}/{Entity}/{RecordId} {Operation} (entrega {DeliveryCount}, {CorrelationId}): {Error}",
+                evt.SourceSystem, evt.EntityName, evt.SourceRecordId, evt.Operation, message.DeliveryCount, evt.CorrelationId, ex.Message);
+            throw;
+        }
     }
 }
