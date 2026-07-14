@@ -1,0 +1,212 @@
+@page "/maps/{Name}/history"
+@inject ISyncHistoryStore HistoryStore
+
+<PageTitle>Histórico: @Name — Axxon Integrator</PageTitle>
+
+<h1>Histórico: @Name</h1>
+<p class="toolbar">
+    <a class="btn" href="/maps/@Name">← Volver al mapa</a>
+    <button class="btn" @onclick="ReloadAsync">Actualizar</button>
+    @if (Filtered.Any())
+    {
+        <a class="btn" download="@($"{Name}-historico.csv")" href="@CsvHref()">Exportar CSV</a>
+    }
+</p>
+
+@if (_error is not null)
+{
+    <div class="banner error">@_error</div>
+}
+
+@if (_entries is null)
+{
+    <p>Cargando…</p>
+}
+else if (_entries.Count == 0)
+{
+    <p class="placeholder">
+        Sin actividad registrada para este mapa todavía. El histórico se escribe a
+        medida que el motor procesa eventos.
+    </p>
+}
+else
+{
+    <section class="history-summary">
+        @foreach (var group in _entries.GroupBy(e => e.Outcome).OrderBy(g => g.Key))
+        {
+            var outcome = group.Key;
+            <button class="counter @OutcomeClass(outcome) @(_outcomeFilter == outcome ? "selected" : "")"
+                    @onclick="() => ToggleFilter(outcome)">
+                @Label(outcome): <strong>@group.Count()</strong>
+            </button>
+        }
+        @if (_outcomeFilter is not null)
+        {
+            <button class="btn" @onclick="() => _outcomeFilter = null">Quitar filtro</button>
+        }
+    </section>
+
+    <table class="grid">
+        <thead>
+            <tr>
+                <th>Procesado (UTC)</th>
+                <th>Resultado</th>
+                <th>Operación</th>
+                <th>Registro origen</th>
+                <th>Registro destino</th>
+                <th>Empresa</th>
+                <th>Entrega</th>
+                <th>Correlación</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var entry in Filtered)
+            {
+                var e = entry;
+                <tr class="@(e.Outcome == SyncOutcome.Failed ? "history-failed" : "")">
+                    <td class="mono">@e.ProcessedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                    <td>
+                        @if (e.Error is null)
+                        {
+                            <span class="status @OutcomeClass(e.Outcome)">@Label(e.Outcome)</span>
+                        }
+                        else
+                        {
+                            <button class="status link @OutcomeClass(e.Outcome)" @onclick="() => ToggleError(e)">
+                                @Label(e.Outcome) @(_expandedErrors.Contains(e) ? "▾" : "▸")
+                            </button>
+                        }
+                    </td>
+                    <td>@e.Operation</td>
+                    <td class="mono">@e.SourceSystem/@e.SourceRecordId</td>
+                    <td class="mono">@(e.TargetRecordId is null ? "—" : $"{e.TargetSystem}/{e.TargetRecordId}")</td>
+                    <td>@(e.Company ?? "—")</td>
+                    <td>@e.DeliveryCount</td>
+                    <td class="mono">@e.CorrelationId</td>
+                </tr>
+                @if (e.Error is not null && _expandedErrors.Contains(e))
+                {
+                    <tr class="history-error-detail">
+                        <td colspan="8"><pre>@e.Error</pre></td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+
+    @if (_maybeMore)
+    {
+        <p class="toolbar"><button class="btn" @onclick="LoadMoreAsync">Cargar más</button></p>
+    }
+}
+
+@code {
+    [Parameter] public string Name { get; set; } = "";
+
+    private const int PageSize = 50;
+
+    private List<SyncHistoryEntry>? _entries;
+    private bool _maybeMore;
+    private SyncOutcome? _outcomeFilter;
+    private readonly HashSet<SyncHistoryEntry> _expandedErrors = [];
+    private string? _error;
+
+    private IEnumerable<SyncHistoryEntry> Filtered =>
+        (_entries ?? []).Where(e => _outcomeFilter is null || e.Outcome == _outcomeFilter);
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _entries = null;
+        _expandedErrors.Clear();
+        await LoadPageAsync(before: null);
+    }
+
+    private Task LoadMoreAsync() => LoadPageAsync(_entries is { Count: > 0 } ? _entries[^1].ProcessedAt : null);
+
+    private async Task LoadPageAsync(DateTimeOffset? before)
+    {
+        try
+        {
+            var page = await HistoryStore.GetForMapAsync(Name, PageSize, before, CancellationToken.None);
+            (_entries ??= []).AddRange(page);
+            _maybeMore = page.Count == PageSize;
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            _error = $"No se pudo leer el histórico: {ex.Message}";
+            _entries ??= [];
+        }
+    }
+
+    private void ToggleFilter(SyncOutcome outcome) =>
+        _outcomeFilter = _outcomeFilter == outcome ? null : outcome;
+
+    private void ToggleError(SyncHistoryEntry entry)
+    {
+        if (!_expandedErrors.Remove(entry))
+        {
+            _expandedErrors.Add(entry);
+        }
+    }
+
+    private static string Label(SyncOutcome outcome) => outcome switch
+    {
+        SyncOutcome.Created => "Creado",
+        SyncOutcome.Updated => "Actualizado",
+        SyncOutcome.Deleted => "Borrado",
+        SyncOutcome.EchoSuppressed => "Eco suprimido",
+        SyncOutcome.DiscardedByLastWriterWins => "Descartado (LWW)",
+        SyncOutcome.Failed => "Error",
+        _ => outcome.ToString(),
+    };
+
+    private static string OutcomeClass(SyncOutcome outcome) => outcome switch
+    {
+        SyncOutcome.Created or SyncOutcome.Updated => "outcome-ok",
+        SyncOutcome.Deleted => "outcome-deleted",
+        SyncOutcome.Failed => "outcome-failed",
+        _ => "outcome-skipped",
+    };
+
+    /// <summary>
+    /// CSV de lo cargado/filtrado como data URI: sin endpoint de descarga ni JS
+    /// interop. El formato exportable se genera desde la consulta; el storage sigue
+    /// siendo consultable (Tables/JSONL), no CSV.
+    /// </summary>
+    private string CsvHref()
+    {
+        var rows = new List<string>
+        {
+            "processedAtUtc,outcome,operation,sourceSystem,sourceRecordId,targetSystem,targetRecordId,company,deliveryCount,correlationId,error",
+        };
+        rows.AddRange(Filtered.Select(e => string.Join(",",
+            Csv(e.ProcessedAt.UtcDateTime.ToString("O")),
+            Csv(e.Outcome.ToString()),
+            Csv(e.Operation.ToString()),
+            Csv(e.SourceSystem),
+            Csv(e.SourceRecordId),
+            Csv(e.TargetSystem),
+            Csv(e.TargetRecordId ?? ""),
+            Csv(e.Company ?? ""),
+            Csv(e.DeliveryCount.ToString()),
+            Csv(e.CorrelationId),
+            Csv(e.Error ?? ""))));
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(string.Join("\r\n", rows));
+        return $"data:text/csv;charset=utf-8;base64,{Convert.ToBase64String(bytes)}";
+    }
+
+    private static string Csv(string value)
+    {
+        // (char)34 = comilla doble: el literal '"' descoloca al parser de Razor.
+        const char quote = (char)34;
+        if (value.IndexOfAny([',', quote, '\n', '\r']) < 0)
+        {
+            return value;
+        }
+        return quote + value.Replace(quote.ToString(), new string(quote, 2)) + quote;
+    }
+}

@@ -1,5 +1,6 @@
 using Axxon.Integrator.AdminPortal.Components;
 using Axxon.Integrator.Azure;
+using global::Azure.Data.Tables;
 using global::Azure.Identity;
 using global::Azure.Storage.Blobs;
 using Axxon.Integrator.Connectors.Dataverse;
@@ -45,6 +46,27 @@ else
         mapsDirectory = Path.Combine(builder.Environment.ContentRootPath, "maps");
     }
     builder.Services.AddSingleton<IEntityMapStore>(_ => new JsonFileEntityMapStore(mapsDirectory));
+}
+
+// Histórico de sincronización (lo escribe el motor; acá solo se lee para la pestaña
+// Histórico): Table Storage con History:TableUri, archivos JSONL locales si no. En
+// desarrollo, apuntar History:Directory al mismo directorio que usa el SyncEngine.
+var historyTableUri = builder.Configuration["History:TableUri"];
+if (!string.IsNullOrWhiteSpace(historyTableUri))
+{
+    builder.Services.AddSingleton<ISyncHistoryStore>(_ => new TableSyncHistoryStore(new TableClient(
+        new Uri(historyTableUri),
+        builder.Configuration["History:TableName"] ?? "synchistory",
+        new DefaultAzureCredential())));
+}
+else
+{
+    var historyDirectory = builder.Configuration["History:Directory"];
+    if (string.IsNullOrWhiteSpace(historyDirectory))
+    {
+        historyDirectory = Path.Combine(builder.Environment.ContentRootPath, "history");
+    }
+    builder.Services.AddSingleton<ISyncHistoryStore>(_ => new JsonFileSyncHistoryStore(historyDirectory));
 }
 
 var app = builder.Build();

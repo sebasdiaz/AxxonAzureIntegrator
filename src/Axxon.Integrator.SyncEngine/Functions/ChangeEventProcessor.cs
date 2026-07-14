@@ -37,7 +37,7 @@ public sealed class ChangeEventProcessor(SyncPipeline pipeline, ILogger<ChangeEv
 
         try
         {
-            await pipeline.ProcessAsync(evt, ct);
+            await pipeline.ProcessAsync(evt, message.DeliveryCount, ct);
         }
         catch (Exception ex)
         {

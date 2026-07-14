@@ -104,3 +104,21 @@ public interface IWatermarkStore
     Task<Watermark?> GetAsync(string system, string entityName, CancellationToken ct);
     Task SaveAsync(Watermark watermark, CancellationToken ct);
 }
+
+/// <summary>
+/// Histórico de sincronización por mapa: qué registros se crearon/actualizaron/
+/// borraron y qué intentos fallaron con qué error. Append-only, escrito best-effort
+/// por el pipeline (Table Storage en producción, archivos JSONL locales en
+/// desarrollo) y leído por la pestaña Histórico del portal.
+/// </summary>
+public interface ISyncHistoryStore
+{
+    Task AppendAsync(SyncHistoryEntry entry, CancellationToken ct);
+
+    /// <summary>
+    /// Página del histórico de un mapa, del más nuevo al más viejo. Paginación por
+    /// cursor: <paramref name="before"/> devuelve solo entradas anteriores a ese
+    /// ProcessedAt (null = desde el presente).
+    /// </summary>
+    Task<IReadOnlyList<SyncHistoryEntry>> GetForMapAsync(string mapName, int take, DateTimeOffset? before, CancellationToken ct);
+}
