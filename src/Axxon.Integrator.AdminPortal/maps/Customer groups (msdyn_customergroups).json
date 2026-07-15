@@ -1,0 +1,43 @@
+{
+  "name": "Customer groups (msdyn_customergroups)",
+  "sourceSystem": "finops",
+  "sourceEntity": "mserp_custcustomergroupentity",
+  "targetSystem": "dataverse",
+  "targetEntity": "msdyn_customergroup",
+  "direction": "oneWay",
+  "status": "active",
+  "companies": [
+    "ALAS",
+    "ATLA"
+  ],
+  "fields": [
+    {
+      "source": "mserp_customergroupid",
+      "target": "msdyn_groupid",
+      "transform": null,
+      "valueMap": null,
+      "defaultValue": null
+    },
+    {
+      "source": "mserp_description",
+      "target": "msdyn_description",
+      "transform": null,
+      "valueMap": null,
+      "defaultValue": null
+    },
+    {
+      "source": "mserp_issalestaxincludedinprice",
+      "target": "msdyn_issalestaxincludedinprice",
+      "transform": null,
+      "valueMap": {
+        "200000000": "false",
+        "200000001": "true"
+      },
+      "defaultValue": null
+    }
+  ],
+  "integrationKey": [
+    "msdyn_groupid"
+  ],
+  "version": 3
+}
