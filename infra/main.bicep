@@ -221,6 +221,9 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'Maps__BlobContainerUri', value: 'https://${storage.name}.blob.${environment().suffixes.storage}/${entityMapsContainer.name}' }
         { name: 'History__TableUri', value: 'https://${storage.name}.table.${environment().suffixes.storage}' }
         { name: 'History__TableName', value: syncHistoryTable.name }
+        // Xref en Cosmos por identidad (rol de datos Cosmos DB Built-in Data
+        // Contributor sobre la managed identity: pendiente junto al resto del RBAC).
+        { name: 'Xref__CosmosAccountEndpoint', value: cosmos.properties.documentEndpoint }
         // App registrations (decisión 14). Secrets por referencia de Key Vault:
         // requiere el rol Key Vault Secrets User sobre la managed identity (pendiente
         // junto con el resto del RBAC).
