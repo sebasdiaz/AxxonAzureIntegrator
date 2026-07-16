@@ -1,9 +1,10 @@
 {
   "name": "Customer groups (msdyn_customergroups)",
   "sourceSystem": "finops",
-  "sourceEntity": "mserp_custcustomergroupentity",
+  "sourceEntity": "CustomerGroups",
   "targetSystem": "dataverse",
   "targetEntity": "msdyn_customergroup",
+  "sourceEventEntity": "mserp_custcustomergroupentity",
   "direction": "oneWay",
   "status": "active",
   "companies": [
@@ -12,21 +13,21 @@
   ],
   "fields": [
     {
-      "source": "mserp_customergroupid",
+      "source": "CustomerGroupId",
       "target": "msdyn_groupid",
       "transform": null,
       "valueMap": null,
       "defaultValue": null
     },
     {
-      "source": "mserp_description",
+      "source": "Description",
       "target": "msdyn_description",
       "transform": null,
       "valueMap": null,
       "defaultValue": null
     },
     {
-      "source": "mserp_issalestaxincludedinprice",
+      "source": "IsSalesTaxIncludedInPrice",
       "target": "msdyn_issalestaxincludedinprice",
       "transform": null,
       "valueMap": {
@@ -39,5 +40,5 @@
   "integrationKey": [
     "msdyn_groupid"
   ],
-  "version": 3
+  "version": 7
 }

@@ -44,10 +44,19 @@ public sealed class FinOpsMetadataTests
     }
     """;
 
+    private const string DataEntityNameJson = """
+    {
+      "@odata.context": "https://unit.test/Metadata/$metadata#DataEntities(Name)",
+      "value": [ { "Name": "CustCustomerV3Entity" } ]
+    }
+    """;
+
     [Fact]
     public async Task Parses_entity_with_composite_key()
     {
-        var connector = ConnectorWith(new StubHandler(HttpStatusCode.OK, PublicEntitiesJson));
+        var connector = ConnectorWith(new StubHandler(
+            (HttpStatusCode.OK, PublicEntitiesJson),
+            (HttpStatusCode.OK, DataEntityNameJson)));
 
         var metadata = await connector.GetMetadataAsync("CustomersV3", CancellationToken.None);
 
@@ -58,20 +67,28 @@ public sealed class FinOpsMetadataTests
         Assert.Equal("Decimal", metadata.Fields["CreditLimit"]);
         // El namespace del enum se recorta a su nombre
         Assert.Equal("NoYes", metadata.Fields["IsOneTimeCustomer"]);
+        // Alias de data events: mserp_ + nombre AOT de la data entity en minúsculas
+        Assert.Equal("mserp_custcustomerv3entity", metadata.EventEntityName);
     }
 
     [Fact]
     public async Task Queries_public_entities_by_entity_set_name()
     {
-        var stub = new StubHandler(HttpStatusCode.OK, PublicEntitiesJson);
+        var stub = new StubHandler(
+            (HttpStatusCode.OK, PublicEntitiesJson),
+            (HttpStatusCode.OK, DataEntityNameJson));
         var connector = ConnectorWith(stub);
 
         await connector.GetMetadataAsync("CustomersV3", CancellationToken.None);
 
-        var sent = Assert.Single(stub.Requests);
+        Assert.Equal(2, stub.Requests.Count);
+        var sent = stub.Requests[0];
         Assert.StartsWith("https://unit.test/metadata/PublicEntities", sent.RequestUri!.ToString());
         Assert.Contains("EntitySetName", sent.RequestUri.ToString());
         Assert.Equal("4.0", Assert.Single(sent.Headers.GetValues("OData-Version")));
+        // La segunda llamada resuelve el nombre AOT para el alias de eventos
+        Assert.StartsWith("https://unit.test/metadata/DataEntities", stub.Requests[1].RequestUri!.ToString());
+        Assert.Contains("PublicCollectionName", stub.Requests[1].RequestUri!.ToString());
     }
 
     [Fact]

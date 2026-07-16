@@ -49,6 +49,15 @@
                 }
             </datalist>
         </label>
+        <label>Entidad origen en los eventos
+            <input @bind="_sourceEventEntity" @bind:after="OnEventEntityEdited"
+                   placeholder="(igual a la entidad origen)" />
+            <span class="hint">
+                Nombre con el que la entidad llega en los eventos cuando difiere del de la
+                API (F&O: la entidad virtual mserp_ de los data events). Se completa solo
+                desde la metadata; sin metadata, escribilo a mano o dejalo vacío.
+            </span>
+        </label>
         <label>Sistema destino
             <select @bind="_targetSystem" @bind:after="OnTargetSystemChangedAsync">
                 @foreach (var s in Connectors.Keys)
@@ -249,6 +258,8 @@
     private bool _nameTouched;
     private string _sourceSystem = "dataverse";
     private string _sourceEntity = "";
+    private string _sourceEventEntity = "";
+    private bool _sourceEventEntityTouched;
     private string _targetSystem = "finops";
     private string _targetEntity = "";
     private readonly HashSet<string> _companies = new(StringComparer.OrdinalIgnoreCase);
@@ -293,6 +304,7 @@
         _name = map.Name;
         _sourceSystem = map.SourceSystem;
         _sourceEntity = map.SourceEntity;
+        _sourceEventEntity = map.SourceEventEntity ?? "";
         _targetSystem = map.TargetSystem;
         _targetEntity = map.TargetEntity;
         _companies.UnionWith(map.Companies);
@@ -396,11 +408,22 @@
         }
     }
 
+    /// <summary>El usuario escribió el alias a mano: la metadata deja de pisarlo en esta sesión de edición.</summary>
+    private void OnEventEntityEdited() => _sourceEventEntityTouched = true;
+
     /// <summary>No limpia el warning: eso lo hacen los handlers de usuario, para no pisar avisos de la carga de entidades.</summary>
     private async Task LoadMetadataAsync()
     {
-        _sourceFields = await FieldsOfAsync(_sourceSystem, _sourceEntity);
-        _targetFields = await FieldsOfAsync(_targetSystem, _targetEntity);
+        var sourceMetadata = await MetadataOfAsync(_sourceSystem, _sourceEntity);
+        _sourceFields = FieldNamesOf(sourceMetadata);
+        // El alias de eventos sale de la metadata (autoridad); solo se respeta el valor
+        // del usuario si lo tipeó a mano en esta edición (ambiente sin metadata).
+        if (!_sourceEventEntityTouched && sourceMetadata is not null)
+        {
+            _sourceEventEntity = sourceMetadata.EventEntityName ?? "";
+        }
+
+        _targetFields = FieldNamesOf(await MetadataOfAsync(_targetSystem, _targetEntity));
     }
 
     private async Task<IReadOnlyList<string>> EntitiesOfAsync(string system)
@@ -427,31 +450,33 @@
         }
     }
 
-    private async Task<IReadOnlyList<string>> FieldsOfAsync(string system, string entity)
+    private async Task<EntityMetadata?> MetadataOfAsync(string system, string entity)
     {
         if (string.IsNullOrWhiteSpace(entity) || !Connectors.TryGetValue(system, out var connector))
         {
-            return [];
+            return null;
         }
 
         try
         {
-            var metadata = await connector.GetMetadataAsync(entity.Trim(), CancellationToken.None);
-            return [.. metadata.Fields.Keys.OrderBy(f => f, StringComparer.OrdinalIgnoreCase)];
+            return await connector.GetMetadataAsync(entity.Trim(), CancellationToken.None);
         }
         catch (NotImplementedException)
         {
             // El conector todavía no expone metadata: el diseñador degrada a entrada
             // manual de nombres de campo en lugar de bloquear al usuario.
             _metadataWarning = "La metadata de los conectores no está disponible aún; escribí los nombres de campo a mano.";
-            return [];
+            return null;
         }
         catch (Exception ex)
         {
             _metadataWarning = $"No se pudo leer la metadata de {system}/{entity}: {ex.Message}";
-            return [];
+            return null;
         }
     }
+
+    private static IReadOnlyList<string> FieldNamesOf(EntityMetadata? metadata) =>
+        metadata is null ? [] : [.. metadata.Fields.Keys.OrderBy(f => f, StringComparer.OrdinalIgnoreCase)];
 
     private void AddRow() => _rows.Add(new FieldRow());
 
@@ -529,6 +554,7 @@
         Name = _name.Trim(),
         SourceSystem = _sourceSystem.Trim(),
         SourceEntity = _sourceEntity.Trim(),
+        SourceEventEntity = string.IsNullOrWhiteSpace(_sourceEventEntity) ? null : _sourceEventEntity.Trim(),
         TargetSystem = _targetSystem.Trim(),
         TargetEntity = _targetEntity.Trim(),
         Status = _status,

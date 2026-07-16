@@ -73,6 +73,41 @@ public sealed class FinOpsDataEventParserTests
     }
 
     [Fact]
+    public void Parse_adds_aliases_without_virtual_entity_prefix()
+    {
+        const string payload = """
+        {
+          "MessageName": "OnExternalCreated",
+          "PrimaryEntityName": "mserp_custcustomergroupentity",
+          "EventTimeIso8601": "2026-07-14T17:48:13Z",
+          "InputParameters": [
+            {
+              "key": "Target",
+              "value": {
+                "Id": "00004951-0000-0000-5e1a-005001000000",
+                "Attributes": [
+                  { "key": "mserp_customergroupid", "value": "Default" },
+                  { "key": "mserp_dataareaid", "value": "alas" },
+                  { "key": "CustomerGroupId", "value": "SinPrefijo" }
+                ]
+              }
+            }
+          ]
+        }
+        """;
+
+        var evt = _parser.Parse(BinaryData.FromString(payload));
+
+        // El alias permite que un mapa del diseñador (nombres OData) resuelva los
+        // campos de un data event (mserp_* en minúsculas) sin metadata en el motor.
+        Assert.Equal("Default", evt.Data["mserp_customergroupid"]);
+        Assert.Equal("Default", evt.Data["customergroupid"]);
+        Assert.Equal("alas", evt.Data["dataareaid"]);
+        Assert.Equal("alas", evt.Company);
+        Assert.Equal("SinPrefijo", evt.Data["CustomerGroupId"]); // una clave real nunca se pisa con un alias
+    }
+
+    [Fact]
     public void Parse_without_envelope_falls_back_to_OperationCreatedOn_and_generates_correlation()
     {
         const string payload = """

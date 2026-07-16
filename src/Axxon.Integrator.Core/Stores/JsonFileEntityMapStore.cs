@@ -43,7 +43,10 @@ public sealed class JsonFileEntityMapStore(string directory) : IEntityMapStore
         [.. (await GetAllAsync(ct)).Where(m =>
             m.Status == MapStatus.Active &&
             string.Equals(m.SourceSystem, sourceSystem, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(m.SourceEntity, sourceEntity, StringComparison.OrdinalIgnoreCase))];
+            // Los eventos pueden traer el nombre canónico de la API o el alias de
+            // eventos (data events mserp_ de F&O): ambos rutean al mismo mapa.
+            (string.Equals(m.SourceEntity, sourceEntity, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(m.SourceEventEntity, sourceEntity, StringComparison.OrdinalIgnoreCase)))];
 
     public async Task<EntityMap?> GetAsync(string name, CancellationToken ct)
     {

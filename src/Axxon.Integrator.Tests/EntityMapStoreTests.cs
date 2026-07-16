@@ -40,6 +40,27 @@ public sealed class EntityMapStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Source_lookup_matches_event_entity_alias()
+    {
+        var store = new JsonFileEntityMapStore(_directory);
+        await store.SaveAsync(SampleMap("cg") with
+        {
+            SourceSystem = "finops",
+            SourceEntity = "CustomerGroups",
+            SourceEventEntity = "mserp_custcustomergroupentity",
+            TargetSystem = "dataverse",
+        }, CancellationToken.None);
+
+        // Un data event real llega con el nombre de la entidad virtual mserp_ y un
+        // catch-up por OData llegaría con el nombre canónico: ambos rutean al mapa.
+        Assert.Single(await store.GetMapsForSourceAsync("finops", "mserp_custcustomergroupentity", CancellationToken.None));
+        Assert.Single(await store.GetMapsForSourceAsync("finops", "CustomerGroups", CancellationToken.None));
+
+        var loaded = await store.GetAsync("cg", CancellationToken.None);
+        Assert.Equal("mserp_custcustomergroupentity", loaded!.SourceEventEntity); // persiste en el documento
+    }
+
+    [Fact]
     public async Task Paused_maps_are_excluded_from_source_lookup_but_listed()
     {
         var store = new JsonFileEntityMapStore(_directory);

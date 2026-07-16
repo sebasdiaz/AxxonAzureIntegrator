@@ -41,7 +41,9 @@ public sealed class BlobEntityMapStore(BlobContainerClient container) : IEntityM
         [.. (await GetAllAsync(ct)).Where(m =>
             m.Status == MapStatus.Active &&
             string.Equals(m.SourceSystem, sourceSystem, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(m.SourceEntity, sourceEntity, StringComparison.OrdinalIgnoreCase))];
+            // Mismo criterio que JsonFileEntityMapStore: nombre canónico o alias de eventos.
+            (string.Equals(m.SourceEntity, sourceEntity, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(m.SourceEventEntity, sourceEntity, StringComparison.OrdinalIgnoreCase)))];
 
     public async Task<EntityMap?> GetAsync(string name, CancellationToken ct)
     {

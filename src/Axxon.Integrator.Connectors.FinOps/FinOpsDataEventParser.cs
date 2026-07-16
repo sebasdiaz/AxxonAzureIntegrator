@@ -117,6 +117,16 @@ public sealed partial class FinOpsDataEventParser : IChangeEventParser
                 data[key.GetString()!] = ConvertValue(value);
             }
         }
+
+        // Alias sin el prefijo de entidad virtual: los data events traen los campos
+        // como mserp_* en minúsculas (mserp_customergroupid) pero los mapas del
+        // diseñador usan los nombres públicos OData (CustomerGroupId). El alias deja
+        // ambos nombres en Data — el MappingEngine resuelve case-insensitive — sin
+        // necesitar metadata de F&O en el motor. TryAdd: un campo real nunca se pisa.
+        foreach (var key in data.Keys.Where(k => k.StartsWith("mserp_", StringComparison.OrdinalIgnoreCase)).ToList())
+        {
+            data.TryAdd(key["mserp_".Length..], data[key]);
+        }
         return data;
     }
 

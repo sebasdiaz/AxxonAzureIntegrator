@@ -31,4 +31,11 @@ public sealed record EntityMetadata
     public required IReadOnlyList<string> KeyFields { get; init; }
 
     public required IReadOnlyDictionary<string, string> Fields { get; init; } // nombre -> tipo
+
+    /// <summary>
+    /// Nombre con el que la entidad llega en los eventos del sistema, cuando difiere
+    /// del nombre de la API (F&O: entidad virtual mserp_ de los data events). Alimenta
+    /// <see cref="EntityMap.SourceEventEntity"/> en el diseñador; null = coinciden.
+    /// </summary>
+    public string? EventEntityName { get; init; }
 }

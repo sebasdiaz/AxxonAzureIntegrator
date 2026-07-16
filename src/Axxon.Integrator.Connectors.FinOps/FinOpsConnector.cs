@@ -180,7 +180,39 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
             EntityName = entity.GetProperty("EntitySetName").GetString()!,
             KeyFields = keyFields, // compuesta: típicamente dataAreaId + clave natural
             Fields = fields,
+            EventEntityName = await EventEntityNameFor(entityName, ct),
         };
+    }
+
+    /// <summary>
+    /// Nombre de la entidad en los data events: la entidad virtual mserp_ se llama
+    /// 'mserp_' + nombre AOT de la data entity en minúsculas (CustCustomerGroupEntity →
+    /// mserp_custcustomergroupentity). El nombre AOT sale de metadata/DataEntities;
+    /// best-effort: sin él el diseñador degrada a entrada manual del alias.
+    /// </summary>
+    private async Task<string?> EventEntityNameFor(string entitySetName, CancellationToken ct)
+    {
+        try
+        {
+            using var request = ODataRequest.Get(
+                $"metadata/DataEntities?$filter=PublicCollectionName%20eq%20'{entitySetName}'&$select=Name");
+            using var response = await Http.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+
+            using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            var matches = doc.RootElement.GetProperty("value");
+            if (matches.GetArrayLength() == 0)
+            {
+                return null;
+            }
+
+            var aotName = matches[0].GetProperty("Name").GetString();
+            return string.IsNullOrEmpty(aotName) ? null : $"mserp_{aotName.ToLowerInvariant()}";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or KeyNotFoundException)
+        {
+            return null;
+        }
     }
 
     public async Task<IReadOnlyList<string>> ListEntitiesAsync(CancellationToken ct)

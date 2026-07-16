@@ -31,7 +31,7 @@ public sealed class MappingEngine
             // Ausencia de clave != campo nulo: los data events de F&O omiten datetimes
             // en NULL, así que un campo ausente sin DefaultValue no se escribe (evita
             // pisar el valor del destino con un null fantasma).
-            if (!evt.Data.TryGetValue(fieldMap.Source, out var value))
+            if (!TryResolveSource(evt.Data, fieldMap.Source, out var value))
             {
                 if (fieldMap.DefaultValue is not null)
                 {
@@ -85,5 +85,29 @@ public sealed class MappingEngine
             IdempotencyKey = $"{map.Name}:{evt.SourceRecordId}:{evt.OccurredAt.UtcTicks}",
             CorrelationId = evt.CorrelationId,
         };
+    }
+
+    /// <summary>
+    /// Resuelve el campo origen tolerando la diferencia de casing entre el nombre del
+    /// mapa y el del evento (CustomerGroupId del diseñador vs el alias customergroupid
+    /// de un data event de F&O). Data llega deserializado del topic como diccionario
+    /// case-sensitive; los payloads son chicos, el barrido lineal alcanza.
+    /// </summary>
+    private static bool TryResolveSource(IReadOnlyDictionary<string, object?> data, string source, out object? value)
+    {
+        if (data.TryGetValue(source, out value))
+        {
+            return true;
+        }
+
+        foreach (var pair in data)
+        {
+            if (string.Equals(pair.Key, source, StringComparison.OrdinalIgnoreCase))
+            {
+                value = pair.Value;
+                return true;
+            }
+        }
+        return false;
     }
 }

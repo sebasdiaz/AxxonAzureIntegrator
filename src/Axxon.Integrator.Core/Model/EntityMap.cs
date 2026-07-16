@@ -30,6 +30,17 @@ public sealed record EntityMap
     public required string TargetEntity { get; init; }
 
     /// <summary>
+    /// Nombre con el que la entidad origen llega en los eventos, cuando difiere del
+    /// nombre canónico de la API. Caso F&O: la API OData usa el public collection name
+    /// (<c>CustomerGroups</c>) pero los data events emiten la entidad virtual mserp_
+    /// (<c>mserp_custcustomergroupentity</c>). El ruteo de eventos matchea contra ambos;
+    /// el <see cref="PairKey"/> usa solo <see cref="SourceEntity"/> para que el vínculo
+    /// del xref no dependa del alias. Lo completa el diseñador desde la metadata; null
+    /// cuando el nombre de la API y el de los eventos coinciden (Dataverse).
+    /// </summary>
+    public string? SourceEventEntity { get; init; }
+
+    /// <summary>
     /// Identidad canónica del par de entidades, independiente de la dirección: los dos
     /// mapas de un bidireccional (A→B y B→A) comparten PairKey y, con él, el vínculo
     /// del xref y su estado de sync — requisito para que eco y last-writer-wins crucen
