@@ -8,6 +8,7 @@ using global::Azure.Data.Tables;
 using global::Azure.Identity;
 using global::Azure.Messaging.ServiceBus;
 using global::Azure.Storage.Blobs;
+using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -100,12 +101,27 @@ var builder = new HostBuilder()
                 string.IsNullOrWhiteSpace(historyDirectory) ? "history" : historyDirectory));
         }
 
-        // Xref: archivos JSON locales (desarrollo). TODO(fase 1): CosmosXrefStore
-        // (documentos espejo por lado, ETag) y CosmosWatermarkStore cuando entre el
-        // catch-up por polling.
-        var xrefDirectory = context.Configuration["Xref:Directory"];
-        services.AddSingleton<IXrefStore>(_ => new JsonFileXrefStore(
-            string.IsNullOrWhiteSpace(xrefDirectory) ? "xref" : xrefDirectory));
+        // Xref: Cosmos cuando hay Xref:CosmosAccountEndpoint (producción con identidad;
+        // en local, Xref:CosmosKey con la key de la cuenta), archivos JSON locales si
+        // no (desarrollo). La base/contenedor los aprovisiona el Bicep, no el motor.
+        // TODO(fase 1): CosmosWatermarkStore cuando entre el catch-up por polling.
+        var cosmosEndpoint = context.Configuration["Xref:CosmosAccountEndpoint"];
+        if (!string.IsNullOrWhiteSpace(cosmosEndpoint))
+        {
+            var cosmosKey = context.Configuration["Xref:CosmosKey"];
+            var cosmosClient = string.IsNullOrWhiteSpace(cosmosKey)
+                ? new CosmosClient(cosmosEndpoint, new DefaultAzureCredential(), CosmosXrefStore.ClientOptions)
+                : new CosmosClient(cosmosEndpoint, cosmosKey, CosmosXrefStore.ClientOptions);
+            services.AddSingleton<IXrefStore>(_ => new CosmosXrefStore(cosmosClient.GetContainer(
+                context.Configuration["Xref:CosmosDatabase"] ?? "integrator",
+                context.Configuration["Xref:CosmosContainer"] ?? "xref")));
+        }
+        else
+        {
+            var xrefDirectory = context.Configuration["Xref:Directory"];
+            services.AddSingleton<IXrefStore>(_ => new JsonFileXrefStore(
+                string.IsNullOrWhiteSpace(xrefDirectory) ? "xref" : xrefDirectory));
+        }
 
         services.AddSingleton<SyncPipeline>();
     });
