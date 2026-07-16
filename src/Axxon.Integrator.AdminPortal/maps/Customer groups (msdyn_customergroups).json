@@ -34,17 +34,10 @@
         "200000001": "true"
       },
       "defaultValue": null
-    },
-    {
-      "source": "ClearingPeriodPaymentTermName",
-      "target": "msdyn_clearingperiodpaymenttermname",
-      "transform": null,
-      "valueMap": null,
-      "defaultValue": null
     }
   ],
   "integrationKey": [
     "msdyn_groupid"
   ],
-  "version": 4
+  "version": 8
 }
