@@ -100,6 +100,20 @@ table.fields input, table.fields select, table.fields textarea { width: 100%; }
 
 .toolbar { display: flex; gap: .5rem; margin-bottom: 1rem; }
 
+.tabs { display: flex; gap: .25rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+.tabs button {
+    font: inherit;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: .5rem .9rem;
+    margin-bottom: -1px;
+    cursor: pointer;
+    color: var(--muted);
+}
+.tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.tabs button:hover { color: var(--text); }
+
 .banner { padding: .6rem .9rem; border-radius: 6px; margin-bottom: 1rem; }
 .banner.warning { background: var(--warning-bg); border: 1px solid #e8d28b; }
 .banner.error { background: var(--error-bg); border: 1px solid #e3a29c; }
