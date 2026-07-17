@@ -63,9 +63,14 @@ public static class EntraHttp
     public static HttpClient ClientFor(EntraAppOptions options) => new(
         new EntraBearerHandler(options)
         {
-            // Cliente singleton (vive lo que el conector): rotar conexiones para no
-            // fijar DNS de por vida.
-            InnerHandler = new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(10) },
+            // Bearer → retry ante throttling (429/503 con Retry-After: service
+            // protection limits de Dataverse, ráfagas del diseñador o de un run
+            // agendado) → sockets. Cliente singleton (vive lo que el conector):
+            // rotar conexiones para no fijar DNS de por vida.
+            InnerHandler = new ThrottlingRetryHandler
+            {
+                InnerHandler = new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(10) },
+            },
         })
     {
         // BaseAddress depende SOLO de EnvironmentUrl: con configuración parcial (p.ej.
