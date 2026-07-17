@@ -5,15 +5,38 @@
 <PageTitle>Mapas — Axxon Integrator</PageTitle>
 
 <h1>Mapas de entidades</h1>
-<p class="toolbar"><a class="btn primary" href="/maps/new">Nuevo mapa</a></p>
+
+@* Dos pestañas sobre el mismo store: un mapeo agendado es el mismo EntityMap con
+   Schedule — comparte diseñador, histórico y motor; solo cambia cómo se dispara. *@
+<div class="tabs">
+    <button class="@(_tab == Tab.Events ? "active" : null)" @onclick="() => _tab = Tab.Events">
+        Por eventos (@(EventMaps.Count))
+    </button>
+    <button class="@(_tab == Tab.Scheduled ? "active" : null)" @onclick="() => _tab = Tab.Scheduled">
+        Agendados (@(ScheduledMaps.Count))
+    </button>
+</div>
+
+<p class="toolbar">
+    @if (_tab == Tab.Events)
+    {
+        <a class="btn primary" href="/maps/new">Nuevo mapa</a>
+    }
+    else
+    {
+        <a class="btn primary" href="/maps/new?scheduled=true">Nuevo mapeo agendado</a>
+    }
+</p>
 
 @if (_maps is null)
 {
     <p>Cargando…</p>
 }
-else if (_maps.Count == 0)
+else if (Current.Count == 0)
 {
-    <p>No hay mapas todavía. Creá el primero con «Nuevo mapa».</p>
+    <p>@(_tab == Tab.Events
+        ? "No hay mapas por eventos todavía. Creá el primero con «Nuevo mapa»."
+        : "No hay mapeos agendados todavía. Creá el primero con «Nuevo mapeo agendado» — corre según su cron haciendo pull del origen.")</p>
 }
 else
 {
@@ -23,23 +46,39 @@ else
                 <th>Mapa</th>
                 <th>Origen</th>
                 <th>Destino</th>
-                <th>Integration key</th>
-                <th>Empresas</th>
+                @if (_tab == Tab.Scheduled)
+                {
+                    <th>Cron (UTC)</th>
+                    <th>Modo</th>
+                }
+                else
+                {
+                    <th>Integration key</th>
+                    <th>Empresas</th>
+                }
                 <th>Estado</th>
                 <th>v</th>
                 <th></th>
             </tr>
         </thead>
         <tbody>
-            @foreach (var map in _maps)
+            @foreach (var map in Current)
             {
                 var m = map;
                 <tr>
                     <td><a href="/maps/@m.Name">@m.Name</a></td>
                     <td>@m.SourceSystem / @m.SourceEntity</td>
                     <td>@m.TargetSystem / @m.TargetEntity</td>
-                    <td>@string.Join(" + ", m.IntegrationKey)</td>
-                    <td>@(m.Companies.Count == 0 ? "todas" : string.Join(", ", m.Companies))</td>
+                    @if (_tab == Tab.Scheduled)
+                    {
+                        <td><code>@m.Schedule!.Cron</code></td>
+                        <td>@ModeLabel(m.Schedule!)</td>
+                    }
+                    else
+                    {
+                        <td>@string.Join(" + ", m.IntegrationKey)</td>
+                        <td>@(m.Companies.Count == 0 ? "todas" : string.Join(", ", m.Companies))</td>
+                    }
                     <td><span class="status @m.Status.ToString().ToLowerInvariant()">@(m.Status == MapStatus.Active ? "Activo" : "Pausado")</span></td>
                     <td>@m.Version</td>
                     <td class="row-actions">
@@ -61,8 +100,19 @@ else
 }
 
 @code {
+    private enum Tab { Events, Scheduled }
+
     private IReadOnlyList<EntityMap>? _maps;
+    private Tab _tab = Tab.Events;
     private string? _pendingDelete;
+
+    private IReadOnlyList<EntityMap> EventMaps => [.. (_maps ?? []).Where(m => m.Schedule is null)];
+    private IReadOnlyList<EntityMap> ScheduledMaps => [.. (_maps ?? []).Where(m => m.Schedule is not null)];
+    private IReadOnlyList<EntityMap> Current => _tab == Tab.Events ? EventMaps : ScheduledMaps;
+
+    private static string ModeLabel(MapSchedule schedule) =>
+        (schedule.Mode == ScheduledRunMode.Incremental ? "Incremental" : "Full export") +
+        (schedule.DetectDeletes ? " + deletes" : "");
 
     protected override async Task OnInitializedAsync() =>
         _maps = await MapStore.GetAllAsync(CancellationToken.None);

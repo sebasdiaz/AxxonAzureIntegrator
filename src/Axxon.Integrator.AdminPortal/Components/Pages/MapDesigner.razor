@@ -7,9 +7,9 @@
 @using System.Text.Json
 @using Axxon.Integrator.Core.Stores
 
-<PageTitle>@(_isNew ? "Nuevo mapa" : Name) — Axxon Integrator</PageTitle>
+<PageTitle>@(_isNew ? NewTitle : Name) — Axxon Integrator</PageTitle>
 
-<h1>@(_isNew ? "Nuevo mapa" : $"Mapa: {Name}")</h1>
+<h1>@(_isNew ? NewTitle : $"Mapa: {Name}")</h1>
 
 @if (_error is not null)
 {
@@ -270,7 +270,12 @@
 @code {
     [Parameter] public string? Name { get; set; }
 
+    /// <summary>«Nuevo mapeo agendado» de la pestaña Agendados: abre el diseñador con la programación activada.</summary>
+    [SupplyParameterFromQuery(Name = "scheduled")] public bool Scheduled { get; set; }
+
     private bool _isNew => Name is null;
+
+    private string NewTitle => Scheduled ? "Nuevo mapeo agendado" : "Nuevo mapa";
 
     private string _name = "";
     private bool _nameTouched;
@@ -308,6 +313,11 @@
     {
         if (_isNew)
         {
+            if (Scheduled)
+            {
+                _scheduleEnabled = true;
+                _scheduleCron = "0 */15 * * * *"; // punto de partida editable: cada 15 minutos
+            }
             await LoadEntitiesAsync();
             await LoadCompaniesAsync();
             await LoadMetadataAsync();
