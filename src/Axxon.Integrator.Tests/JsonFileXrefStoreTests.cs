@@ -57,6 +57,25 @@ public sealed class JsonFileXrefStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Links_for_pair_dedupe_mirrors_and_filter_other_pairs()
+    {
+        var store = new JsonFileXrefStore(_directory);
+        await store.SaveLinkAsync(SampleLink, CancellationToken.None);
+        await store.SaveLinkAsync(SampleLink with { RecordIdA = "otro-registro", RecordIdB = "otro-destino" }, CancellationToken.None);
+        await store.SaveLinkAsync(SampleLink with { PairKey = "dataverse:contact|finops:vendorsv2" }, CancellationToken.None);
+
+        var links = new List<XrefLink>();
+        await foreach (var link in store.GetLinksForPairAsync(SampleLink.PairKey, CancellationToken.None))
+        {
+            links.Add(link);
+        }
+
+        // dos vínculos del par (cada uno persistido como dos espejos), el par ajeno afuera
+        Assert.Equal(2, links.Count);
+        Assert.All(links, l => Assert.Equal(SampleLink.PairKey, l.PairKey));
+    }
+
+    [Fact]
     public async Task Unknown_record_returns_null()
     {
         var store = new JsonFileXrefStore(_directory);

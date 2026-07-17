@@ -93,6 +93,39 @@ public sealed class CosmosXrefStore(Container container) : IXrefStore
         }
     }
 
+    public async IAsyncEnumerable<XrefLink> GetLinksForPairAsync(string pairKey,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        // Query cross-partition (la PK es /lookupKey): es el barrido de la detección de
+        // deletes de los mapas agendados, no un camino caliente. Los espejos comparten
+        // contenido: dedupe por la identidad del lado A.
+        var query = new QueryDefinition("SELECT * FROM c WHERE c.pairKey = @pairKey")
+            .WithParameter("@pairKey", pairKey.ToLowerInvariant());
+        using var iterator = container.GetItemQueryIterator<XrefDocument>(query);
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (iterator.HasMoreResults)
+        {
+            foreach (var doc in await iterator.ReadNextAsync(ct))
+            {
+                if (!seen.Add($"{doc.SystemA}|{doc.RecordIdA}"))
+                {
+                    continue;
+                }
+                yield return new XrefLink
+                {
+                    PairKey = doc.PairKey,
+                    SystemA = doc.SystemA,
+                    RecordIdA = doc.RecordIdA,
+                    SystemB = doc.SystemB,
+                    RecordIdB = doc.RecordIdB,
+                    State = doc.State,
+                    ETag = $"{doc.LookupKey}{ETagSeparator}{doc.ETag}",
+                };
+            }
+        }
+    }
+
     /// <summary>Misma lookup key que <c>JsonFileXrefStore</c>, saneada para id de Cosmos (prohíbe / \ # ?).</summary>
     private static string LookupKeyFor(string pairKey, string system, string recordId)
     {

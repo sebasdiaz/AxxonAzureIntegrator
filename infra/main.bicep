@@ -75,6 +75,23 @@ resource engineSubscription 'Microsoft.ServiceBus/namespaces/topics/subscription
   }
 }
 
+// Cola de runs agendados: el ScheduleDispatcher (timer) encola una ocurrencia por
+// mapa vencido y el ScheduledRunProcessor la ejecuta. Sesiones (SessionId = mapa) =
+// un mapa nunca corre dos runs en paralelo; duplicate detection (MessageId = mapa +
+// ocurrencia) = ticks del timer con ventanas solapadas no duplican runs.
+resource scheduledRunsQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' = {
+  parent: serviceBus
+  name: 'scheduled-runs'
+  properties: {
+    requiresSession: true
+    requiresDuplicateDetection: true
+    duplicateDetectionHistoryTimeWindow: 'PT10M'
+    maxDeliveryCount: 5
+    deadLetteringOnMessageExpiration: true
+    lockDuration: 'PT5M' // un run hace pull paginado del origen: más largo que un mensaje común
+  }
+}
+
 // --- Cosmos DB: xref (vínculos + estado) y watermarks ----------------------
 // Los mapas NO viven acá: son blobs JSON en el storage account (más abajo).
 resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2023-11-15' = {
@@ -115,6 +132,19 @@ resource xrefContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/conta
     resource: {
       id: 'xref'
       partitionKey: { paths: ['/lookupKey'], kind: 'Hash' }
+    }
+  }
+}
+
+// Watermarks de los mapas agendados: un documento por mapa (id = 'system|map:<nombre>'),
+// point read + upsert. El escritor es único (sesiones de 'scheduled-runs'), sin ETag.
+resource watermarksContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2023-11-15' = {
+  parent: cosmosDb
+  name: 'watermarks'
+  properties: {
+    resource: {
+      id: 'watermarks'
+      partitionKey: { paths: ['/id'], kind: 'Hash' }
     }
   }
 }
@@ -218,6 +248,7 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'Sync:IngestQueue', value: ingestQueue.name }
         { name: 'Sync:ChangesTopic', value: changesTopic.name }
         { name: 'Sync:EngineSubscription', value: engineSubscription.name }
+        { name: 'Sync:ScheduledRunsQueue', value: scheduledRunsQueue.name }
         { name: 'Maps__BlobContainerUri', value: 'https://${storage.name}.blob.${environment().suffixes.storage}/${entityMapsContainer.name}' }
         { name: 'History__TableUri', value: 'https://${storage.name}.table.${environment().suffixes.storage}' }
         { name: 'History__TableName', value: syncHistoryTable.name }

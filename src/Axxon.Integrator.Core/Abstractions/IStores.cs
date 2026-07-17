@@ -21,6 +21,14 @@ public interface IXrefStore
 
     /// <summary>Crea o actualiza el vínculo (concurrencia optimista vía <see cref="XrefLink.ETag"/>).</summary>
     Task SaveLinkAsync(XrefLink link, CancellationToken ct);
+
+    /// <summary>
+    /// Todos los vínculos de un par de entidades, deduplicando los documentos espejo
+    /// (un vínculo por par de registros). Lo usa la detección de deletes por ausencia
+    /// de los mapas agendados; es un barrido, no un point read — no llamarlo en el
+    /// camino caliente del pipeline.
+    /// </summary>
+    IAsyncEnumerable<XrefLink> GetLinksForPairAsync(string pairKey, CancellationToken ct);
 }
 
 /// <summary>
@@ -69,6 +77,14 @@ public sealed record SyncState
 
     /// <summary>OccurredAt del evento ganador. Cualquier evento del vínculo más viejo que esto pierde por last-writer-wins.</summary>
     public required DateTimeOffset LastWriterOccurredAt { get; init; }
+
+    /// <summary>
+    /// Tombstone de delete: el pipeline lo deja sin campos ni hash tras borrar el
+    /// destino (ver SyncPipeline). La detección de deletes por ausencia lo usa para
+    /// no re-emitir el delete de un vínculo ya borrado en cada run agendado.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsTombstone => WrittenFields.Count == 0 && WrittenPayloadHash.Length == 0;
 }
 
 /// <summary>

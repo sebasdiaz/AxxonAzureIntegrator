@@ -1,9 +1,6 @@
-using System.Security.Cryptography;
-using System.Text;
 using Azure.Messaging.ServiceBus;
 using Axxon.Integrator.Core.Abstractions;
 using Axxon.Integrator.Core.Model;
-using Axxon.Integrator.Core.Sync;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 
@@ -49,15 +46,7 @@ public sealed class IngestProcessor(
             throw;
         }
 
-        var outgoing = new ServiceBusMessage(BinaryData.FromObjectAsJson(evt))
-        {
-            SessionId = $"{evt.SourceSystem}:{evt.EntityName}:{evt.SourceRecordId}",
-            MessageId = DeterministicMessageId(evt),
-            CorrelationId = evt.CorrelationId,
-            ContentType = "application/json",
-        };
-
-        await changesTopicSender.SendMessageAsync(outgoing, ct);
+        await changesTopicSender.SendMessageAsync(ChangeEventMessages.Envelope(evt), ct);
 
         logger.LogInformation("Ingesta normalizada: {System}/{Entity}/{RecordId} {Operation} ({CorrelationId})",
             evt.SourceSystem, evt.EntityName, evt.SourceRecordId, evt.Operation, evt.CorrelationId);
@@ -76,14 +65,4 @@ public sealed class IngestProcessor(
 
     private static string Truncate(string text, int max) =>
         text.Length <= max ? text : text[..max] + "…";
-
-    /// <summary>
-    /// Mismo evento → mismo MessageId, para que el duplicate detection del topic
-    /// (ventana de 10 min) absorba re-entregas y re-envíos del origen.
-    /// </summary>
-    private static string DeterministicMessageId(ChangeEvent evt)
-    {
-        var composite = $"{evt.SourceSystem}|{evt.EntityName}|{evt.SourceRecordId}|{(int)evt.Operation}|{evt.OccurredAt.UtcTicks}|{EchoGuard.ComputeHash(evt.Data)}";
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(composite)));
-    }
 }

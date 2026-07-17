@@ -18,8 +18,14 @@ public interface IConnector
     /// <summary>Identificador lógico del sistema (ej. "finops", "dataverse").</summary>
     string SystemName { get; }
 
-    /// <summary>Captura incremental por polling desde una watermark (catch-up o sistemas sin eventos push).</summary>
-    IAsyncEnumerable<ChangeEvent> PullChangesAsync(Watermark since, CancellationToken ct);
+    /// <summary>
+    /// Captura incremental por polling desde una watermark (mapas agendados, catch-up,
+    /// sistemas sin eventos push). Con <see cref="Watermark.Token"/> vacío es un barrido
+    /// completo (modo full export / primer run). El query aporta entidad, filtro por
+    /// empresas y <see cref="EntityQuery.KeysOnly"/>; el token de la watermark es opaco
+    /// y propio del conector.
+    /// </summary>
+    IAsyncEnumerable<ChangeEvent> PullChangesAsync(EntityQuery query, Watermark since, CancellationToken ct);
 
     /// <summary>
     /// Escritura idempotente en el destino. Debe comportarse como upsert: si

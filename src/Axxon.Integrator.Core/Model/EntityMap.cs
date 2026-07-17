@@ -67,6 +67,48 @@ public sealed record EntityMap
 
     /// <summary>Los mapas son versionados: los eventos en vuelo se procesan con la versión vigente al consumirse.</summary>
     public int Version { get; init; } = 1;
+
+    /// <summary>
+    /// Ejecución agendada del mapa (null = solo data events). Un mapa puede tener las
+    /// dos cosas: los eventos lo mantienen near-real-time y el run periódico actúa de
+    /// red de contención (eventos perdidos, deletes que el origen no publica).
+    /// </summary>
+    public MapSchedule? Schedule { get; init; }
+}
+
+public enum ScheduledRunMode
+{
+    /// <summary>Trae solo lo modificado desde la última watermark del mapa.</summary>
+    Incremental,
+
+    /// <summary>Re-publica todos los registros del origen en cada run (tablas de referencia chicas).</summary>
+    FullExport
+}
+
+/// <summary>
+/// Programación de un mapa: el run periódico hace pull del origen y publica los
+/// cambios al mismo topic que los data events, así todo el pipeline (eco, conflicto,
+/// xref, histórico, DLQ) aplica igual.
+/// </summary>
+public sealed record MapSchedule
+{
+    /// <summary>
+    /// Expresión cron en UTC, formato NCRONTAB de 5 o 6 campos (con segundos), el
+    /// mismo de los timer triggers de Functions. Ej: "0 */15 * * * *" = cada 15 min.
+    /// </summary>
+    public required string Cron { get; init; }
+
+    public ScheduledRunMode Mode { get; init; } = ScheduledRunMode.Incremental;
+
+    /// <summary>
+    /// Detección de deletes por ausencia: además del pull, el run recorre las claves
+    /// vivas del origen y compara contra los vínculos del xref del par — lo que el
+    /// xref conoce y ya no está en el origen se publica como Delete. Necesario para
+    /// orígenes que no publican tombstones por polling (OData de F&O). El barrido de
+    /// claves es sobre todas las empresas (la ausencia debe ser absoluta), así que
+    /// conviene reservarlo para entidades de volumen acotado.
+    /// </summary>
+    public bool DetectDeletes { get; init; }
 }
 
 public sealed record FieldMap

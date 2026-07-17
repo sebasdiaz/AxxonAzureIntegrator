@@ -92,6 +92,33 @@
 </section>
 
 <section class="card">
+    <h2>Programación</h2>
+    <p class="hint">Además de reaccionar a los data events, el mapa puede correr según agenda: un pull periódico del origen que entra al mismo pipeline. Útil para reconciliación y para entidades sin eventos.</p>
+    <label class="key-option">
+        <input type="checkbox" @bind="_scheduleEnabled" />
+        Ejecutar según agenda
+    </label>
+    @if (_scheduleEnabled)
+    {
+        <div class="form-grid">
+            <label>Cron (UTC, formato NCRONTAB de 5 o 6 campos)
+                <input @bind="_scheduleCron" placeholder="0 */15 * * * * (cada 15 minutos)" />
+            </label>
+            <label>Modo
+                <select @bind="_scheduleMode">
+                    <option value="Incremental">Incremental (solo lo modificado desde el último run)</option>
+                    <option value="FullExport">Full export (todo el origen en cada run)</option>
+                </select>
+            </label>
+        </div>
+        <label class="key-option">
+            <input type="checkbox" @bind="_scheduleDetectDeletes" />
+            Detectar deletes por ausencia (barre las claves vivas del origen y borra en el destino lo que ya no está; para entidades de volumen acotado)
+        </label>
+    }
+</section>
+
+<section class="card">
     <h2>Campos</h2>
     <table class="grid fields">
         <thead>
@@ -255,6 +282,10 @@
     private string _companiesFreeText = "";
     private IReadOnlyList<string> _companyOptions = [];
     private MapStatus _status = MapStatus.Active;
+    private bool _scheduleEnabled;
+    private string _scheduleCron = "";
+    private ScheduledRunMode _scheduleMode = ScheduledRunMode.Incremental;
+    private bool _scheduleDetectDeletes;
     private int _version = 1;
     private List<FieldRow> _rows = [new()];
     private readonly HashSet<string> _integrationKey = new(StringComparer.OrdinalIgnoreCase);
@@ -298,6 +329,10 @@
         _companies.UnionWith(map.Companies);
         _companiesFreeText = string.Join(", ", map.Companies);
         _status = map.Status;
+        _scheduleEnabled = map.Schedule is not null;
+        _scheduleCron = map.Schedule?.Cron ?? "";
+        _scheduleMode = map.Schedule?.Mode ?? ScheduledRunMode.Incremental;
+        _scheduleDetectDeletes = map.Schedule?.DetectDeletes ?? false;
         _version = map.Version;
         _rows = [.. map.Fields.Select(FieldRow.From)];
         _integrationKey.UnionWith(map.IntegrationKey);
@@ -536,6 +571,9 @@
         Fields = [.. _rows.Where(r => r.IsComplete).Select(r => r.ToFieldMap())],
         IntegrationKey = [.. _integrationKey],
         Version = version,
+        Schedule = _scheduleEnabled
+            ? new MapSchedule { Cron = _scheduleCron.Trim(), Mode = _scheduleMode, DetectDeletes = _scheduleDetectDeletes }
+            : null,
     };
 
     private async Task SaveAsync()
@@ -578,6 +616,21 @@
         if (_integrationKey.Count == 0)
         {
             return "Elegí al menos un campo destino como integration key.";
+        }
+        if (_scheduleEnabled)
+        {
+            if (string.IsNullOrWhiteSpace(_scheduleCron))
+            {
+                return "La programación necesita una expresión cron (ej. \"0 */15 * * * *\").";
+            }
+            try
+            {
+                ScheduleEvaluator.Validate(_scheduleCron.Trim());
+            }
+            catch (FormatException ex)
+            {
+                return ex.Message;
+            }
         }
         return null;
     }

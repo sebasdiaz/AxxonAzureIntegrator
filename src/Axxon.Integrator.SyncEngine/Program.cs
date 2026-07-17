@@ -4,6 +4,7 @@ using Axxon.Integrator.Connectors.FinOps;
 using Axxon.Integrator.Core.Abstractions;
 using Axxon.Integrator.Core.Stores;
 using Axxon.Integrator.Core.Sync;
+using Axxon.Integrator.SyncEngine.Functions;
 using global::Azure.Data.Tables;
 using global::Azure.Identity;
 using global::Azure.Messaging.ServiceBus;
@@ -83,6 +84,15 @@ var builder = new HostBuilder()
         services.AddSingleton(sp => sp.GetRequiredService<ServiceBusClient>()
             .CreateSender(context.Configuration["Sync:ChangesTopic"] ?? "changes"));
 
+        // Mapas agendados: el dispatcher encola runs en 'scheduled-runs' (sesiones por
+        // mapa) y el run publica lo pulleado al topic 'changes' con las mismas
+        // convenciones que la ingesta.
+        services.AddSingleton(sp => new ScheduledRunsSender(sp.GetRequiredService<ServiceBusClient>()
+            .CreateSender(context.Configuration["Sync:ScheduledRunsQueue"] ?? "scheduled-runs")));
+        services.AddSingleton<IChangeEventPublisher>(sp =>
+            new ServiceBusChangeEventPublisher(sp.GetRequiredService<ServiceBusSender>()));
+        services.AddSingleton<ScheduledRunService>();
+
         // Histórico de sincronización: Table Storage cuando hay History:TableUri
         // (producción, managed identity), archivos JSONL locales si no (desarrollo).
         // El pipeline lo escribe best-effort; la pestaña Histórico del portal lo lee.
@@ -101,10 +111,10 @@ var builder = new HostBuilder()
                 string.IsNullOrWhiteSpace(historyDirectory) ? "history" : historyDirectory));
         }
 
-        // Xref: Cosmos cuando hay Xref:CosmosAccountEndpoint (producción con identidad;
-        // en local, Xref:CosmosKey con la key de la cuenta), archivos JSON locales si
-        // no (desarrollo). La base/contenedor los aprovisiona el Bicep, no el motor.
-        // TODO(fase 1): CosmosWatermarkStore cuando entre el catch-up por polling.
+        // Xref y watermarks: Cosmos cuando hay Xref:CosmosAccountEndpoint (producción
+        // con identidad; en local, Xref:CosmosKey con la key de la cuenta), archivos
+        // JSON locales si no (desarrollo). La base/contenedores los aprovisiona el
+        // Bicep, no el motor.
         var cosmosEndpoint = context.Configuration["Xref:CosmosAccountEndpoint"];
         if (!string.IsNullOrWhiteSpace(cosmosEndpoint))
         {
@@ -112,15 +122,22 @@ var builder = new HostBuilder()
             var cosmosClient = string.IsNullOrWhiteSpace(cosmosKey)
                 ? new CosmosClient(cosmosEndpoint, new DefaultAzureCredential(), CosmosXrefStore.ClientOptions)
                 : new CosmosClient(cosmosEndpoint, cosmosKey, CosmosXrefStore.ClientOptions);
+            var cosmosDatabase = context.Configuration["Xref:CosmosDatabase"] ?? "integrator";
             services.AddSingleton<IXrefStore>(_ => new CosmosXrefStore(cosmosClient.GetContainer(
-                context.Configuration["Xref:CosmosDatabase"] ?? "integrator",
+                cosmosDatabase,
                 context.Configuration["Xref:CosmosContainer"] ?? "xref")));
+            services.AddSingleton<IWatermarkStore>(_ => new CosmosWatermarkStore(cosmosClient.GetContainer(
+                cosmosDatabase,
+                context.Configuration["Watermarks:CosmosContainer"] ?? "watermarks")));
         }
         else
         {
             var xrefDirectory = context.Configuration["Xref:Directory"];
             services.AddSingleton<IXrefStore>(_ => new JsonFileXrefStore(
                 string.IsNullOrWhiteSpace(xrefDirectory) ? "xref" : xrefDirectory));
+            var watermarksDirectory = context.Configuration["Watermarks:Directory"];
+            services.AddSingleton<IWatermarkStore>(_ => new JsonFileWatermarkStore(
+                string.IsNullOrWhiteSpace(watermarksDirectory) ? "watermarks" : watermarksDirectory));
         }
 
         services.AddSingleton<SyncPipeline>();
