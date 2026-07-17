@@ -6,6 +6,7 @@ using global::Azure.Storage.Blobs;
 using Axxon.Integrator.Connectors.Dataverse;
 using Axxon.Integrator.Connectors.FinOps;
 using Axxon.Integrator.Core.Abstractions;
+using Axxon.Integrator.Core.Connectors;
 using Axxon.Integrator.Core.Stores;
 using Axxon.Integrator.Core.Sync;
 
@@ -18,10 +19,15 @@ builder.Services.AddRazorComponents()
 // sistema (GetMetadataAsync), autenticados con las app registrations de Entra ID
 // (decisión 14). Sin credenciales configuradas el portal arranca igual y el
 // diseñador degrada a entrada manual de nombres de campo.
+// MetadataCachingConnector: la metadata (entidades, empresas, campos, option sets)
+// se lee del origen una vez y se sirve de memoria — sin el caché, la ráfaga del
+// diseñador en cada visita golpea los service protection limits de Dataverse (429).
 var dataverse = builder.Configuration.GetSection("Dataverse").Get<EntraAppOptions>() ?? new EntraAppOptions();
 var finops = builder.Configuration.GetSection("FinOps").Get<EntraAppOptions>() ?? new EntraAppOptions();
-builder.Services.AddSingleton<IConnector>(new DataverseConnector(EntraHttp.ClientFor(dataverse), dataverse));
-builder.Services.AddSingleton<IConnector>(new FinOpsConnector(EntraHttp.ClientFor(finops), finops));
+builder.Services.AddSingleton<IConnector>(new MetadataCachingConnector(
+    new DataverseConnector(EntraHttp.ClientFor(dataverse), dataverse)));
+builder.Services.AddSingleton<IConnector>(new MetadataCachingConnector(
+    new FinOpsConnector(EntraHttp.ClientFor(finops), finops)));
 builder.Services.AddSingleton<IReadOnlyDictionary<string, IConnector>>(sp =>
     sp.GetServices<IConnector>().ToDictionary(c => c.SystemName));
 builder.Services.AddSingleton<MappingEngine>();
