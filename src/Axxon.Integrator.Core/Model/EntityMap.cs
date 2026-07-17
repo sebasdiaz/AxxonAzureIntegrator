@@ -30,6 +30,15 @@ public sealed record EntityMap
     public required string TargetEntity { get; init; }
 
     /// <summary>
+    /// Nombre con el que el origen publica sus data events cuando difiere del nombre
+    /// OData de <see cref="SourceEntity"/>. F&O publica con el nombre de la entidad
+    /// virtual: "mserp_" + nombre AOT en minúsculas (ej. "mserp_custcustomergroupentity"
+    /// para CustomerGroups) — no es derivable del nombre OData, por eso es configuración
+    /// del mapa. Null = los eventos llegan con el mismo nombre que SourceEntity.
+    /// </summary>
+    public string? SourceEventEntity { get; init; }
+
+    /// <summary>
     /// Identidad canónica del par de entidades, independiente de la dirección: los dos
     /// mapas de un bidireccional (A→B y B→A) comparten PairKey y, con él, el vínculo
     /// del xref y su estado de sync — requisito para que eco y last-writer-wins crucen
@@ -45,6 +54,18 @@ public sealed record EntityMap
             return string.Join("|", sides).ToLowerInvariant();
         }
     }
+
+    /// <summary>
+    /// ¿Este mapa procesa los eventos de <paramref name="sourceSystem"/>/<paramref name="sourceEntity"/>?
+    /// Matchea contra el nombre OData (<see cref="SourceEntity"/>, el que traen los
+    /// eventos de un run agendado) o contra <see cref="SourceEventEntity"/> (el que
+    /// traen los data events del bus). Predicado único para todos los stores.
+    /// </summary>
+    public bool MatchesSource(string sourceSystem, string sourceEntity) =>
+        Status == MapStatus.Active &&
+        string.Equals(SourceSystem, sourceSystem, StringComparison.OrdinalIgnoreCase) &&
+        (string.Equals(SourceEntity, sourceEntity, StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(SourceEventEntity, sourceEntity, StringComparison.OrdinalIgnoreCase));
 
     public SyncDirection Direction { get; init; } = SyncDirection.OneWay;
     public MapStatus Status { get; init; } = MapStatus.Active;

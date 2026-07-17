@@ -2,6 +2,7 @@
   "name": "Customer groups (msdyn_customergroups)",
   "sourceSystem": "finops",
   "sourceEntity": "CustomerGroups",
+  "sourceEventEntity": "mserp_custcustomergroupentity",
   "targetSystem": "dataverse",
   "targetEntity": "msdyn_customergroup",
   "direction": "oneWay",

@@ -26,12 +26,22 @@ public sealed class MappingEngine
     {
         var fields = new Dictionary<string, object?>(map.Fields.Count);
 
+        // Vista case-insensitive de los datos del evento: los data events de F&O traen
+        // los nombres en minúsculas ("customergroupid") y el mapa usa los públicos OData
+        // ("CustomerGroupId"). No sirve confiar en el comparer del diccionario original:
+        // el evento viaja serializado por el topic y la deserialización lo pierde.
+        var data = new Dictionary<string, object?>(evt.Data.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in evt.Data)
+        {
+            data.TryAdd(key, value);
+        }
+
         foreach (var fieldMap in map.Fields)
         {
             // Ausencia de clave != campo nulo: los data events de F&O omiten datetimes
             // en NULL, así que un campo ausente sin DefaultValue no se escribe (evita
             // pisar el valor del destino con un null fantasma).
-            if (!evt.Data.TryGetValue(fieldMap.Source, out var value))
+            if (!data.TryGetValue(fieldMap.Source, out var value))
             {
                 if (fieldMap.DefaultValue is not null)
                 {

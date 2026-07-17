@@ -40,10 +40,7 @@ public sealed class JsonFileEntityMapStore(string directory) : IEntityMapStore
     }
 
     public async Task<IReadOnlyList<EntityMap>> GetMapsForSourceAsync(string sourceSystem, string sourceEntity, CancellationToken ct) =>
-        [.. (await GetAllAsync(ct)).Where(m =>
-            m.Status == MapStatus.Active &&
-            string.Equals(m.SourceSystem, sourceSystem, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(m.SourceEntity, sourceEntity, StringComparison.OrdinalIgnoreCase))];
+        [.. (await GetAllAsync(ct)).Where(m => m.MatchesSource(sourceSystem, sourceEntity))];
 
     public async Task<EntityMap?> GetAsync(string name, CancellationToken ct)
     {

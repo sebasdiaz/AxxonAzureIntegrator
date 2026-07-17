@@ -181,7 +181,7 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
         {
             throw new InvalidOperationException($"La entidad '{entityName}' no existe en {Options.EnvironmentUrl}.");
         }
-        response.EnsureSuccessStatusCode();
+        await ODataRequest.EnsureSuccessAsync(response, ct);
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         var root = doc.RootElement;
@@ -217,7 +217,7 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
         // Como toda consulta de metadata, no pagina: una respuesta trae todo.
         using var request = ODataRequest.Get("api/data/v9.2/EntityDefinitions?$select=LogicalName&$filter=IsIntersect%20eq%20false");
         using var response = await Http.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await ODataRequest.EnsureSuccessAsync(response, ct);
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
 
@@ -245,7 +245,7 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
         {
             return new Dictionary<string, string>();
         }
-        response.EnsureSuccessStatusCode();
+        await ODataRequest.EnsureSuccessAsync(response, ct);
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         var root = doc.RootElement;

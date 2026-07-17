@@ -136,11 +136,18 @@ public sealed class FinOpsDataEventParserTests
         var evt = _parser.Parse(BinaryData.FromString(payload));
 
         Assert.Equal(ChangeOperation.Create, evt.Operation);
+        // El nombre de entidad conserva el mserp_* del payload: lo traduce el
+        // SourceEventEntity del mapa, no el parser.
         Assert.Equal("mserp_custcustomergroupentity", evt.EntityName);
         Assert.Equal("00004951-0000-0000-5e1a-005001000000", evt.SourceRecordId); // Target.Id: el PrimaryEntityId vacío no cuenta
-        Assert.Equal("alas", evt.Company); // mserp_dataareaid
+        Assert.Equal("alas", evt.Company); // mserp_dataareaid, ya sin prefijo
         Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1784051293000), evt.OccurredAt);
-        Assert.Equal(200000000L, evt.Data["mserp_issalestaxincludedinprice"]);
+        // Los atributos pierden el prefijo mserp_ para que matcheen los nombres
+        // públicos OData del mapa (la diferencia de mayúsculas la absorbe el
+        // MappingEngine).
+        Assert.Equal(200000000L, evt.Data["issalestaxincludedinprice"]);
+        Assert.Equal("Default", evt.Data["customergroupid"]);
+        Assert.False(evt.Data.ContainsKey("mserp_issalestaxincludedinprice"));
     }
 
     [Theory]

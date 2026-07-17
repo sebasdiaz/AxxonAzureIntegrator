@@ -30,7 +30,10 @@ public sealed class SyncPipeline(
         var maps = await mapStore.GetMapsForSourceAsync(evt.SourceSystem, evt.EntityName, ct);
         if (maps.Count == 0)
         {
-            logger.LogDebug("Sin mapas activos para {System}/{Entity}, se descarta {CorrelationId}",
+            // Warning y no Debug: un evento que viajó hasta acá y no matchea ningún mapa
+            // suele ser un mismatch de nomenclatura (p.ej. mserp_* vs nombre OData), y en
+            // Debug el descarte es invisible con el nivel default del host.
+            logger.LogWarning("Sin mapas activos para {System}/{Entity}, se descarta {CorrelationId}",
                 evt.SourceSystem, evt.EntityName, evt.CorrelationId);
             return;
         }

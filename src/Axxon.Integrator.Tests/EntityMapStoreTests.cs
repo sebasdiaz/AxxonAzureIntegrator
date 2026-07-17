@@ -40,6 +40,23 @@ public sealed class EntityMapStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Source_lookup_matches_the_data_event_alias()
+    {
+        var store = new JsonFileEntityMapStore(_directory);
+        await store.SaveAsync(SampleMap("grupos") with
+        {
+            SourceSystem = "finops",
+            SourceEntity = "CustomerGroups",
+            SourceEventEntity = "mserp_custcustomergroupentity",
+        }, CancellationToken.None);
+
+        // Por nombre OData (runs agendados) y por nombre de data event (bus), indistintamente.
+        Assert.Single(await store.GetMapsForSourceAsync("finops", "CustomerGroups", CancellationToken.None));
+        Assert.Single(await store.GetMapsForSourceAsync("finops", "MSERP_CustCustomerGroupEntity", CancellationToken.None));
+        Assert.Empty(await store.GetMapsForSourceAsync("finops", "otraentidad", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Paused_maps_are_excluded_from_source_lookup_but_listed()
     {
         var store = new JsonFileEntityMapStore(_directory);
