@@ -12,7 +12,8 @@ namespace Axxon.Integrator.Tests;
 /// </summary>
 public sealed class FinOpsUpsertTests
 {
-    private const string ExpectedKey = "dataAreaId='usmf',CustomerAccount='C001'";
+    // Canónica: partes ordenadas por nombre de campo (misma identidad para upsert y poll).
+    private const string ExpectedKey = "CustomerAccount='C001',dataAreaId='usmf'";
 
     [Fact]
     public async Task Patches_existing_record_by_composite_key()

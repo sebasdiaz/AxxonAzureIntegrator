@@ -25,7 +25,7 @@ public sealed class DataverseConnector(HttpClient http, EntraAppOptions options)
 
     public string SystemName => "dataverse";
 
-    public IAsyncEnumerable<ChangeEvent> PullChangesAsync(Watermark since, CancellationToken ct) =>
+    public IAsyncEnumerable<ChangeEvent> PullChangesAsync(EntityQuery query, Watermark since, CancellationToken ct) =>
         throw new NotImplementedException("Delta query con change tracking de la Web API. Fase 3.");
 
     public async Task<UpsertResult> UpsertAsync(EntityPayload payload, CancellationToken ct)

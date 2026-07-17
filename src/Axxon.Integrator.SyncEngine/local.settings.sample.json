@@ -16,9 +16,13 @@
     "$comment_history": "Histórico de sync: archivos JSONL locales (vacío = carpeta 'history' junto al host). Para que el portal lo muestre, apuntar ambos al mismo directorio. Producción: Table Storage vía History__TableUri.",
     "History__Directory": "",
     "History__TableUri": "",
+    "$comment_watermarks": "Watermarks de los mapas agendados: archivos JSON locales (vacío = carpeta 'watermarks' junto al host). Producción: contenedor 'watermarks' de la misma cuenta Cosmos del xref.",
+    "Watermarks__Directory": "",
     "Sync:IngestQueue": "ingest",
     "Sync:ChangesTopic": "changes",
     "Sync:EngineSubscription": "sync-engine",
+    "$comment_scheduledRuns": "Cola de runs agendados (sesiones + duplicate detection). Debe existir en el namespace: az servicebus queue create --name scheduled-runs --requires-session true --enable-duplicate-detection true ...",
+    "Sync:ScheduledRunsQueue": "scheduled-runs",
 
     "Dataverse__EnvironmentUrl": "https://<org>.crm.dynamics.com",
     "Dataverse__TenantId": "",

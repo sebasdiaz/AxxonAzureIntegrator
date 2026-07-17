@@ -22,6 +22,7 @@ y sin desarrollo sobre F&O.
 | 12 | Portal de administración en **Blazor**, referenciando `Core` directamente | El diseñador de mapas edita los mismos records `EntityMap`/`FieldMap` que consume el motor — misma validación, cero capa de traducción. Server-side habla con Cosmos/Service Bus/App Insights vía managed identity, sin API intermedia. Se descartó model-driven Power App: acoplaría el control plane a uno de los sistemas integrados, y la mitad operativa (DLQ, métricas) igual exigiría UI custom. |
 | 13 | Mapas persistidos como **documentos JSON planos en Blob Storage** (integration keys compuestas incluidas) | Legibles, diffeables, portables entre ambientes (export/import = copiar el archivo — blob y archivo local son el mismo documento). El **versioning nativo del blob service** conserva la historia de cada guardado y los ETags dan concurrencia optimista, gratis; en Cosmos ambas cosas había que construirlas. Cosmos queda para lo que sí es trabajo de base de datos: xref y watermarks. Integration key como lista de campos del destino, paridad con Dual Write. |
 | 14 | Escritura en Dataverse y F&O con **app registrations de Entra ID** (client credentials); managed identity para todo lo interno de Azure; secretos solo donde un tercero los impone, siempre en Key Vault | Una app registration por sistema, detrás de un application user (Dataverse) / usuario de servicio (F&O) con permisos acotados a las entidades de los mapas. Esa misma identidad es la que el sistema reporta como originador de nuestras escrituras → su ID alimenta la lista de usuarios de integración del `EchoGuard`: credencial de escritura y defensa primaria anti-loop son la misma cosa. |
+| 15 | Mapas **agendados** (cron en el mapa): el run hace pull del origen y **publica al mismo topic `changes`**, nunca escribe directo al destino | Reusar el pipeline entero (sesiones por registro, eco, last-writer-wins, xref, histórico, DLQ) en vez de duplicarlo. La watermark (por mapa, en Cosmos) avanza cuando los eventos quedaron *encolados*: un run que muere a mitad re-trae el solapamiento y lo absorben la dedupe del topic y el upsert idempotente. Un timer único por minuto evalúa los crons (los timer triggers son estáticos al deploy) y encola runs en `scheduled-runs` — sesiones por mapa (nunca dos runs en paralelo del mismo mapa) + duplicate detection (ticks solapados no duplican). |
 
 ## Diagrama
 
@@ -156,6 +157,45 @@ mismos records que consume el motor, con la misma validación. Tres áreas:
 Autenticación Entra ID con roles viewer/operator (pendiente). Acceso a Azure con la
 managed identity del portal, sin API intermedia.
 
+## Mapeos agendados
+
+Además de reaccionar a data events, un mapa puede llevar un `Schedule` (cron NCRONTAB
+en UTC, 5 o 6 campos — el formato de los timer triggers): un pull periódico del origen
+que entra al motor por la misma puerta que los eventos. Casos de uso: entidades sin
+eventos, reconciliación de eventos perdidos, y deletes que el origen no publica.
+
+Flujo: `ScheduleDispatcher` (timer, 1 min, stateless) evalúa el cron de cada mapa
+activo → encola `ScheduledRunRequest` en la cola `scheduled-runs` (SessionId = mapa,
+MessageId = mapa + ocurrencia) → `ScheduledRunProcessor` ejecuta el
+`ScheduledRunService` de Core: pull desde la watermark → publica cada `ChangeEvent` al
+topic `changes` con las convenciones de la ingesta (`ChangeEventMessages`) → detección
+de deletes → guarda la watermark (por mapa: `map:<nombre>`, contenedor `watermarks`
+de Cosmos / archivos en local).
+
+Dos modos por mapa:
+
+- **Incremental**: F&O no expone change tracking por OData, así que el pull filtra por
+  `ModifiedDateTime ge <watermark>` con `cross-company=true` (token = ISO 8601 del
+  máximo visto; borde inclusivo — repetir es barato, perder no). Requiere que la
+  entidad exponga `ModifiedDateTime`.
+- **FullExport**: re-publica todo el origen en cada run (tablas de referencia chicas,
+  o entidades sin `ModifiedDateTime`).
+
+**Deletes por ausencia** (`DetectDeletes`): el polling no ve tombstones, así que el run
+barre las claves vivas del origen (keys-only, **sin filtro de empresa**: la ausencia
+debe ser absoluta o los registros fuera del scope parecerían borrados) y las compara
+contra `GetLinksForPairAsync` del xref — lo que el xref conoce del lado origen y ya no
+existe se publica como `Delete` (OccurredAt = ocurrencia del cron; los tombstones del
+xref evitan re-emitir). Los deletes viajan sin `Company` y el filtro de empresas del
+pipeline los deja pasar a propósito. Reservarlo para entidades de volumen acotado.
+
+Identidad de registros F&O: el pull identifica por el **segmento de clave OData
+canónico** (partes ordenadas por nombre de campo: `CustomerAccount='C001',dataAreaId='usmf'`),
+el mismo que persiste el xref cuando F&O es destino — así upsert y poll comparten
+vínculo. Ojo: los data events identifican por GUID (`PrimaryEntityId`) y suelen usar
+otro nombre de entidad (`mserp_*`), por lo que un mapa event-driven y uno agendado
+sobre la misma entidad viven en espacios de identidad (PairKey) distintos.
+
 ## Sync inicial + cutover
 
 1. Activar la captura de eventos **antes** de la copia masiva (los cambios durante la
@@ -183,8 +223,9 @@ managed identity del portal, sin API intermedia.
 - Las retry policies de Azure Functions **no aplican al trigger de Service Bus**: el
   backoff se implementa re-encolando con `ScheduledEnqueueTime` (decisión 11).
 - Catch-up por polling contra F&O: OData no expone change tracking incremental
-  directo; validar la estrategia (DMF incremental / recurring integrations) antes de
-  apoyarse en `PullChangesAsync` para F&O.
+  directo. `PullChangesAsync` filtra por `ModifiedDateTime` (ver "Mapeos agendados");
+  para volúmenes que ese filtro no aguante, evaluar DMF incremental / recurring
+  integrations.
 
 ## Estructura de la solución
 
@@ -193,10 +234,10 @@ managed identity del portal, sin API intermedia.
 | `Axxon.Integrator.Core` | Contratos (`IConnector`, stores), modelos (`ChangeEvent`, `EntityMap`, `XrefLink`), motor (`SyncPipeline`, `MappingEngine`, `EchoGuard`). Sin dependencias de Azure: testeable unitariamente. |
 | `Axxon.Integrator.Connectors.FinOps` | Parser de data events + escritura OData + export DMF. |
 | `Axxon.Integrator.Connectors.Dataverse` | Parser de service endpoints + escritura Web API + change tracking. |
-| `Axxon.Integrator.SyncEngine` | Azure Functions (isolated, .NET 8): `IngestProcessor` (normaliza y estampa sesión/dedup) y `ChangeEventProcessor` (ejecuta el pipeline). |
+| `Axxon.Integrator.SyncEngine` | Azure Functions (isolated, .NET 8): `IngestProcessor` (normaliza y estampa sesión/dedup), `ChangeEventProcessor` (ejecuta el pipeline), `ScheduleDispatcher` (timer que evalúa los crons) y `ScheduledRunProcessor` (ejecuta los runs agendados). |
 | `Axxon.Integrator.AdminPortal` | Blazor (server): diseñador de mapas, DLQ, métricas. Referencia `Core` — mismos modelos y validación que el motor. |
-| `Axxon.Integrator.Azure` | Infraestructura Azure compartida: auth Entra (`EntraAppOptions`, `EntraBearerHandler`), `BlobEntityMapStore`; futuro hogar de los stores de Cosmos (xref, watermarks). |
-| `infra/` | Bicep: Service Bus (cola `ingest` + topic `changes`), Cosmos DB (xref), Blob Storage (mapas, con versioning), Function App, Key Vault, App Insights. Falta: App Service del portal. |
+| `Axxon.Integrator.Azure` | Infraestructura Azure compartida: auth Entra (`EntraAppOptions`, `EntraBearerHandler`), `BlobEntityMapStore`, `CosmosXrefStore`, `CosmosWatermarkStore`, `TableSyncHistoryStore`. |
+| `infra/` | Bicep: Service Bus (colas `ingest` y `scheduled-runs` + topic `changes`), Cosmos DB (xref, watermarks), Blob Storage (mapas, con versioning), Function App, Key Vault, App Insights. Falta: App Service del portal. |
 
 ## Fases
 

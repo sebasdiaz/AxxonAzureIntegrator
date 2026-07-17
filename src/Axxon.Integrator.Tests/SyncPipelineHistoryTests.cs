@@ -108,6 +108,44 @@ public sealed class SyncPipelineHistoryTests
         Assert.Equal(0, connector.UpsertCalls); // descartado: no se escribió nada
     }
 
+    [Fact]
+    public async Task Delete_without_company_passes_the_company_filter()
+    {
+        // Los deletes por ausencia de los runs agendados no conocen la empresa del
+        // registro borrado: no deben quedar filtrados en mapas con scope de empresas.
+        var history = new InMemoryHistory();
+        var connector = new FakeConnector();
+        var scopedMap = Map with { Companies = ["usmf"] };
+        var pipeline = new SyncPipeline(
+            new SingleMapStore(scopedMap),
+            new NullXref
+            {
+                Link = new XrefLink
+                {
+                    PairKey = scopedMap.PairKey,
+                    SystemA = "finops",
+                    RecordIdA = "REC-1",
+                    SystemB = "dataverse",
+                    RecordIdB = "TARGET-1",
+                },
+            },
+            new EchoGuard(new HashSet<string>()),
+            new MappingEngine(),
+            new Dictionary<string, IConnector> { ["dataverse"] = connector },
+            history,
+            NullLogger<SyncPipeline>.Instance);
+
+        // un update sin empresa sigue filtrado (no hay forma de saber si pertenece al scope)
+        await pipeline.ProcessAsync(Event() with { Company = null }, deliveryCount: 1, CancellationToken.None);
+        Assert.Empty(history.Entries);
+
+        await pipeline.ProcessAsync(Event() with { Company = null, Operation = ChangeOperation.Delete },
+            deliveryCount: 1, CancellationToken.None);
+
+        var entry = Assert.Single(history.Entries);
+        Assert.Equal(SyncOutcome.Deleted, entry.Outcome);
+    }
+
     private sealed class InMemoryHistory : ISyncHistoryStore
     {
         public List<SyncHistoryEntry> Entries { get; } = [];
@@ -138,6 +176,8 @@ public sealed class SyncPipelineHistoryTests
         public Task<XrefLink?> GetLinkAsync(string pairKey, string system, string recordId, CancellationToken ct) =>
             Task.FromResult(Link);
         public Task SaveLinkAsync(XrefLink link, CancellationToken ct) => Task.CompletedTask;
+        public IAsyncEnumerable<XrefLink> GetLinksForPairAsync(string pairKey, CancellationToken ct) =>
+            throw new NotImplementedException();
     }
 
     private sealed class FakeConnector : IConnector
@@ -156,7 +196,7 @@ public sealed class SyncPipelineHistoryTests
         }
 
         public Task DeleteAsync(EntityPayload payload, CancellationToken ct) => Task.CompletedTask;
-        public IAsyncEnumerable<ChangeEvent> PullChangesAsync(Watermark since, CancellationToken ct) => throw new NotImplementedException();
+        public IAsyncEnumerable<ChangeEvent> PullChangesAsync(EntityQuery query, Watermark since, CancellationToken ct) => throw new NotImplementedException();
         public IAsyncEnumerable<EntityPayload> ExportAsync(EntityQuery query, CancellationToken ct) => throw new NotImplementedException();
         public Task<EntityMetadata> GetMetadataAsync(string entityName, CancellationToken ct) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> ListEntitiesAsync(CancellationToken ct) => throw new NotImplementedException();

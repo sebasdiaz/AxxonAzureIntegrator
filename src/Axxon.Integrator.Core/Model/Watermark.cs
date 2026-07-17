@@ -18,6 +18,13 @@ public sealed record EntityQuery
 
     /// <summary>Campos a exportar; vacío = todos los del mapa.</summary>
     public IReadOnlyList<string> Fields { get; init; } = [];
+
+    /// <summary>
+    /// Traer solo los campos de la clave del registro (el conector sabe cuáles son).
+    /// Lo usa la detección de deletes por ausencia: alcanza con enumerar identidades,
+    /// sin pagar el payload completo.
+    /// </summary>
+    public bool KeysOnly { get; init; }
 }
 
 public sealed record EntityMetadata

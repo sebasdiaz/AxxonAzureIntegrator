@@ -53,9 +53,19 @@ public sealed class SyncPipeline(
 
     private async Task ProcessMapAsync(EntityMap map, ChangeEvent evt, int deliveryCount, CancellationToken ct)
     {
-        if (map.Companies.Count > 0 && (evt.Company is null || !map.Companies.Contains(evt.Company, StringComparer.OrdinalIgnoreCase)))
+        if (map.Companies.Count > 0)
         {
-            return;
+            if (evt.Company is not null && !map.Companies.Contains(evt.Company, StringComparer.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            // Un delete sin empresa pasa el filtro: los deletes por ausencia de los
+            // runs agendados no pueden conocer la empresa de un registro que ya no
+            // existe, y si hay vínculo en el xref es porque este par ya sincronizó.
+            if (evt.Company is null && evt.Operation != ChangeOperation.Delete)
+            {
+                return;
+            }
         }
 
         // El vínculo se resuelve por PairKey: los dos sentidos de un bidireccional

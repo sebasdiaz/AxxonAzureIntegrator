@@ -48,6 +48,37 @@ public sealed class JsonFileXrefStore(string directory) : IXrefStore
         }
     }
 
+    public async IAsyncEnumerable<XrefLink> GetLinksForPairAsync(string pairKey,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        if (!Directory.Exists(directory))
+        {
+            yield break;
+        }
+
+        // Barrido del directorio filtrando por el PairKey deserializado (el nombre de
+        // archivo está saneado y no sirve como filtro exacto). Los espejos comparten
+        // contenido: dedupe por la identidad del lado A.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in Directory.EnumerateFiles(directory, "*.json"))
+        {
+            ct.ThrowIfCancellationRequested();
+            XrefLink? link;
+            await using (var stream = File.OpenRead(file))
+            {
+                link = await JsonSerializer.DeserializeAsync<XrefLink>(stream, SerializerOptions, ct);
+            }
+
+            if (link is null ||
+                !string.Equals(link.PairKey, pairKey, StringComparison.OrdinalIgnoreCase) ||
+                !seen.Add($"{link.SystemA}|{link.RecordIdA}"))
+            {
+                continue;
+            }
+            yield return link;
+        }
+    }
+
     /// <summary>Lookup key como nombre de archivo, con los caracteres inválidos (los ':' y '|' del PairKey) aplanados a '-'.</summary>
     private string PathFor(string pairKey, string system, string recordId)
     {

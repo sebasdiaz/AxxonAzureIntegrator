@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using Axxon.Integrator.Azure;
@@ -27,8 +28,138 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
 
     public string SystemName => "finops";
 
-    public IAsyncEnumerable<ChangeEvent> PullChangesAsync(Watermark since, CancellationToken ct) =>
-        throw new NotImplementedException("Catch-up por OData con change tracking. Fase 3.");
+    /// <summary>Campo estándar de las data entities por el que filtra el pull incremental.</summary>
+    private const string ModifiedField = "ModifiedDateTime";
+
+    /// <summary>
+    /// Pull por OData para los mapas agendados: F&O no expone change tracking
+    /// incremental por OData, así que el incremental filtra por
+    /// <see cref="ModifiedField"/> &gt;= watermark (token = ISO 8601 del máximo visto).
+    /// Con token vacío es un barrido completo. Los deletes no se ven por acá — los
+    /// cubre la detección por ausencia (<see cref="Core.Model.MapSchedule.DetectDeletes"/>).
+    /// </summary>
+    public async IAsyncEnumerable<ChangeEvent> PullChangesAsync(EntityQuery query, Watermark since,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        EnsureEnvironmentConfigured();
+        ValidateODataName(query.EntityName, nameof(query));
+
+        // La clave OData (compuesta) identifica cada registro pulleado: es el mismo id
+        // canónico que persiste el xref cuando F&O es destino.
+        var metadata = await GetMetadataAsync(query.EntityName, ct);
+        if (metadata.KeyFields.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"La entidad {query.EntityName} no declara campos clave en su metadata: imposible identificar los registros del pull.");
+        }
+
+        var filters = new List<string>();
+        if (!string.IsNullOrEmpty(since.Token))
+        {
+            if (!metadata.Fields.ContainsKey(ModifiedField))
+            {
+                throw new InvalidOperationException(
+                    $"La entidad {query.EntityName} no expone {ModifiedField}: el pull incremental no tiene por dónde filtrar. Usar modo FullExport.");
+            }
+            if (!DateTimeOffset.TryParse(since.Token, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var sinceTime))
+            {
+                throw new InvalidOperationException(
+                    $"Watermark ilegible para {query.EntityName}: '{since.Token}' no es una fecha ISO 8601.");
+            }
+            // 'ge' inclusivo: el borde se re-trae en el run siguiente y lo absorben la
+            // dedupe del topic y el upsert idempotente — mejor repetir que perder.
+            filters.Add($"{ModifiedField} ge {sinceTime.UtcDateTime:O}");
+        }
+        if (query.Companies.Count > 0)
+        {
+            filters.Add("(" + string.Join(" or ",
+                query.Companies.Select(c => $"dataAreaId eq {ODataLiteral.Format(c)}")) + ")");
+        }
+
+        // cross-company siempre: sin él OData devuelve solo la empresa default del
+        // usuario de integración y el pull "no vería" el resto de las legal entities.
+        var options = new List<string> { "cross-company=true" };
+        if (filters.Count > 0)
+        {
+            options.Add("$filter=" + Uri.EscapeDataString(string.Join(" and ", filters)));
+        }
+        if (query.KeysOnly)
+        {
+            foreach (var key in metadata.KeyFields)
+            {
+                ValidateODataName(key, nameof(query));
+            }
+            options.Add("$select=" + string.Join(",", metadata.KeyFields));
+        }
+
+        var url = $"data/{query.EntityName}?{string.Join("&", options)}";
+        while (url is not null)
+        {
+            using var request = ODataRequest.Get(url);
+            using var response = await Http.SendAsync(request, ct);
+            await ODataRequest.EnsureSuccessAsync(response, ct);
+
+            using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            foreach (var record in doc.RootElement.GetProperty("value").EnumerateArray())
+            {
+                yield return ToChangeEvent(query.EntityName, metadata, record);
+            }
+
+            // Paginación server-driven: el nextLink viene absoluto y se sigue tal cual.
+            url = doc.RootElement.TryGetProperty("@odata.nextLink", out var next) && next.ValueKind == JsonValueKind.String
+                ? next.GetString()
+                : null;
+        }
+    }
+
+    private static ChangeEvent ToChangeEvent(string entityName, EntityMetadata metadata, JsonElement record)
+    {
+        var data = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in record.EnumerateObject())
+        {
+            if (property.Name.StartsWith('@'))
+            {
+                continue; // anotaciones @odata.*
+            }
+            data[property.Name] = ConvertODataValue(property.Value);
+        }
+
+        var occurredAt = data.TryGetValue(ModifiedField, out var modified) &&
+            modified is string text &&
+            DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
+                ? parsed
+                // sin ModifiedDateTime (keys-only o entidad sin el campo) el momento del
+                // cambio es desconocido: el "ahora" del pull ordena el last-writer-wins
+                : DateTimeOffset.UtcNow;
+
+        return new ChangeEvent
+        {
+            SourceSystem = "finops",
+            EntityName = entityName,
+            SourceRecordId = KeySegment(metadata.KeyFields.Select(k => new KeyValuePair<string, object?>(
+                k,
+                data.TryGetValue(k, out var value) && value is not null
+                    ? value
+                    : throw new InvalidOperationException($"El registro pulleado de {entityName} no trae valor para la clave '{k}'.")))),
+            Operation = ChangeOperation.Update, // create vs update lo resuelve el upsert del destino
+            OccurredAt = occurredAt,
+            Company = data.TryGetValue("dataAreaId", out var company) ? company as string : null,
+            Data = data,
+        };
+    }
+
+    /// <summary>Primitivos .NET desde el JSON de OData; las fechas viajan como string ISO, que es lo que los destinos aceptan.</summary>
+    private static object? ConvertODataValue(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Null or JsonValueKind.Undefined => null,
+        JsonValueKind.String => value.GetString(),
+        JsonValueKind.Number => value.TryGetInt64(out var integer) ? integer
+            : value.TryGetDecimal(out var dec) ? dec
+            : value.GetDouble(),
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        _ => value.Clone(),
+    };
 
     public async Task<UpsertResult> UpsertAsync(EntityPayload payload, CancellationToken ct)
     {
@@ -74,7 +205,7 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
         await ODataRequest.EnsureSuccessAsync(response, ct);
     }
 
-    /// <summary>Segmento de clave OData: dataAreaId='usmf',CustomerAccount='C001'.</summary>
+    /// <summary>Segmento de clave OData: CustomerAccount='C001',dataAreaId='usmf'.</summary>
     private static string BuildKeySegment(EntityPayload payload)
     {
         if (payload.IntegrationKey.Count == 0)
@@ -83,14 +214,25 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
                 $"Sin vínculo en el xref y sin integration key en el mapa para {payload.EntityName} ({payload.CorrelationId}): imposible dirigir el upsert OData.");
         }
 
-        var parts = new List<string>(payload.IntegrationKey.Count);
         foreach (var key in payload.IntegrationKey)
         {
             ValidateODataName(key, nameof(payload));
-            parts.Add($"{key}={ODataLiteral.Format(KeyValueFor(payload, key))}");
         }
-        return string.Join(",", parts);
+        return KeySegment(payload.IntegrationKey.Select(k =>
+            new KeyValuePair<string, object?>(k, KeyValueFor(payload, k))));
     }
+
+    /// <summary>
+    /// Segmento de clave canónico: partes ordenadas por nombre de campo, para que el
+    /// mismo registro produzca el mismo id venga del upsert (orden de la integration
+    /// key del mapa) o del poll agendado (orden de la metadata) — el xref y la
+    /// detección de deletes por ausencia comparan estos ids como strings. OData acepta
+    /// las partes de una clave compuesta en cualquier orden.
+    /// </summary>
+    private static string KeySegment(IEnumerable<KeyValuePair<string, object?>> keys) =>
+        string.Join(",", keys
+            .OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(k => $"{k.Key}={ODataLiteral.Format(k.Value)}"));
 
     private static object KeyValueFor(EntityPayload payload, string key)
     {
