@@ -291,7 +291,7 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
         using var request = ODataRequest.Get(
             $"metadata/PublicEntities?$filter=EntitySetName%20eq%20'{entityName}'");
         using var response = await Http.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await ODataRequest.EnsureSuccessAsync(response, ct);
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         var matches = doc.RootElement.GetProperty("value");
@@ -334,7 +334,7 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
         using var request = ODataRequest.Get(
             "metadata/DataEntities?$filter=DataServiceEnabled%20eq%20true&$select=PublicCollectionName");
         using var response = await Http.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await ODataRequest.EnsureSuccessAsync(response, ct);
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
 
@@ -359,7 +359,7 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
         using var entityRequest = ODataRequest.Get(
             $"metadata/PublicEntities?$filter=EntitySetName%20eq%20'{entityName}'");
         using var entityResponse = await Http.SendAsync(entityRequest, ct);
-        entityResponse.EnsureSuccessStatusCode();
+        await ODataRequest.EnsureSuccessAsync(entityResponse, ct);
 
         string? typeName = null;
         using (var doc = await JsonDocument.ParseAsync(await entityResponse.Content.ReadAsStreamAsync(ct), cancellationToken: ct))
@@ -396,7 +396,7 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
         {
             return empty;
         }
-        enumResponse.EnsureSuccessStatusCode();
+        await ODataRequest.EnsureSuccessAsync(enumResponse, ct);
 
         using var enumDoc = await JsonDocument.ParseAsync(await enumResponse.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         var values = new Dictionary<string, string>();
@@ -429,7 +429,7 @@ public sealed class FinOpsConnector(HttpClient http, EntraAppOptions options) : 
         // una página de OData alcanza, sin seguir @odata.nextLink.
         using var request = ODataRequest.Get("data/LegalEntities?$select=LegalEntityId");
         using var response = await Http.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await ODataRequest.EnsureSuccessAsync(response, ct);
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
 

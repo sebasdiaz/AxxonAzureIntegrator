@@ -367,7 +367,7 @@
             }
             catch (Exception ex)
             {
-                _metadataWarning = $"No se pudieron listar las empresas: {ex.Message}";
+                _metadataWarning = $"No se pudieron listar las empresas de {connector.SystemName}: {ex.Message}";
             }
         }
 

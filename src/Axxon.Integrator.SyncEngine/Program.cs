@@ -2,6 +2,7 @@ using Axxon.Integrator.Azure;
 using Axxon.Integrator.Connectors.Dataverse;
 using Axxon.Integrator.Connectors.FinOps;
 using Axxon.Integrator.Core.Abstractions;
+using Axxon.Integrator.Core.Connectors;
 using Axxon.Integrator.Core.Stores;
 using Axxon.Integrator.Core.Sync;
 using Axxon.Integrator.SyncEngine.Functions;
@@ -27,8 +28,14 @@ var builder = new HostBuilder()
         var dataverse = context.Configuration.GetSection("Dataverse").Get<EntraAppOptions>() ?? new EntraAppOptions();
         var finops = context.Configuration.GetSection("FinOps").Get<EntraAppOptions>() ?? new EntraAppOptions();
 
-        services.AddSingleton<IConnector>(new DataverseConnector(EntraHttp.ClientFor(dataverse), dataverse));
-        services.AddSingleton<IConnector>(new FinOpsConnector(EntraHttp.ClientFor(finops), finops));
+        // MetadataCachingConnector: cada pull de F&O arranca pidiendo la metadata de la
+        // entidad (y DetectDeletes la vuelve a pedir en el barrido de deletes). El cupo
+        // de throttling es por usuario de integración y se comparte con el portal — sin
+        // caché, los runs agendados lo consumen y el 429 aparece en cualquiera de los dos.
+        services.AddSingleton<IConnector>(new MetadataCachingConnector(
+            new DataverseConnector(EntraHttp.ClientFor(dataverse), dataverse)));
+        services.AddSingleton<IConnector>(new MetadataCachingConnector(
+            new FinOpsConnector(EntraHttp.ClientFor(finops), finops)));
         services.AddSingleton<IChangeEventParser, FinOpsDataEventParser>();
 
         services.AddSingleton<IReadOnlyDictionary<string, IConnector>>(sp =>
