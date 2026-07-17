@@ -83,11 +83,11 @@ public sealed partial class FinOpsDataEventParser : IChangeEventParser
             SourceRecordId = recordId,
             Operation = operation,
             OccurredAt = occurredAt,
-            // La empresa viene como "dataAreaId" en el contrato documentado y como
-            // "mserp_dataareaid" en los data events reales (entidad virtual mserp_*).
+            // La empresa viene como "dataAreaId" en el contrato documentado; en los data
+            // events reales llega "mserp_dataareaid", que StripVirtualPrefix ya redujo
+            // a "dataareaid".
             Company = data.FirstOrDefault(kv =>
-                string.Equals(kv.Key, "dataAreaId", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(kv.Key, "mserp_dataareaid", StringComparison.OrdinalIgnoreCase)).Value as string,
+                string.Equals(kv.Key, "dataAreaId", StringComparison.OrdinalIgnoreCase)).Value as string,
             Data = data,
             OriginatingUserId = FirstUsefulId(
                 GetString(root, "InitiatingUserAzureActiveDirectoryObjectId"),
@@ -114,11 +114,22 @@ public sealed partial class FinOpsDataEventParser : IChangeEventParser
                 key.ValueKind == JsonValueKind.String &&
                 TryGetPropertyIgnoreCase(pair, "value", out var value))
             {
-                data[key.GetString()!] = ConvertValue(value);
+                data[StripVirtualPrefix(key.GetString()!)] = ConvertValue(value);
             }
         }
         return data;
     }
+
+    /// <summary>
+    /// Los data events llegan con los nombres de la entidad virtual: "mserp_" + nombre
+    /// público en minúsculas ("mserp_customergroupid" para CustomerGroupId). Los mapas
+    /// usan los nombres públicos OData (los mismos del pull y del diseñador), así que
+    /// el prefijo se quita acá y el MappingEngine resuelve la diferencia de mayúsculas.
+    /// El nombre de entidad NO se traduce (no es derivable): eso lo cubre
+    /// EntityMap.SourceEventEntity.
+    /// </summary>
+    private static string StripVirtualPrefix(string name) =>
+        name.StartsWith("mserp_", StringComparison.OrdinalIgnoreCase) ? name["mserp_".Length..] : name;
 
     /// <summary>
     /// Aplana los valores del contrato Xrm a primitivos .NET: los wrappers

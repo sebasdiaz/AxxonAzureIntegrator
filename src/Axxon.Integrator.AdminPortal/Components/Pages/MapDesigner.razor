@@ -49,6 +49,10 @@
                 }
             </datalist>
         </label>
+        <label>Entidad en data events (opcional)
+            <input @bind="_sourceEventEntity" placeholder="mserp_custcustomergroupentity"
+                   title="Nombre con el que el origen publica sus data events, si difiere del nombre OData. Para F&O: mserp_ + nombre AOT de la data entity en minúsculas." />
+        </label>
         <label>Sistema destino
             <select @bind="_targetSystem" @bind:after="OnTargetSystemChangedAsync">
                 @foreach (var s in Connectors.Keys)
@@ -281,6 +285,7 @@
     private bool _nameTouched;
     private string _sourceSystem = "dataverse";
     private string _sourceEntity = "";
+    private string _sourceEventEntity = "";
     private string _targetSystem = "finops";
     private string _targetEntity = "";
     private readonly HashSet<string> _companies = new(StringComparer.OrdinalIgnoreCase);
@@ -334,6 +339,7 @@
         _name = map.Name;
         _sourceSystem = map.SourceSystem;
         _sourceEntity = map.SourceEntity;
+        _sourceEventEntity = map.SourceEventEntity ?? "";
         _targetSystem = map.TargetSystem;
         _targetEntity = map.TargetEntity;
         _companies.UnionWith(map.Companies);
@@ -574,6 +580,7 @@
         Name = _name.Trim(),
         SourceSystem = _sourceSystem.Trim(),
         SourceEntity = _sourceEntity.Trim(),
+        SourceEventEntity = string.IsNullOrWhiteSpace(_sourceEventEntity) ? null : _sourceEventEntity.Trim(),
         TargetSystem = _targetSystem.Trim(),
         TargetEntity = _targetEntity.Trim(),
         Status = _status,
